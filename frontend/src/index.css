@@ -1,0 +1,28 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: #222222;
+  --color-surface: #2C2C2C;
+  --color-border: #575757;
+  --color-muted: #ACACAC;
+  --color-accent: #03ACE4;
+  --color-success: #60BA7B;
+  --color-warning: #FF9900;
+  --color-danger: #DA0004;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  overflow: hidden;
+}
+
+button {
+  cursor: pointer;
+}
