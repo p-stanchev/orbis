@@ -3,12 +3,18 @@ import {
   useEffect,
   useRef,
   useState,
+  type CSSProperties,
+  type PointerEvent,
   type ReactNode,
 } from "react";
 import {
   ChevronDown,
   ChevronRight,
   Folder,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
   MapPin,
   Menu,
   MoreHorizontal,
@@ -23,14 +29,33 @@ import {
   X,
 } from "lucide-react";
 import LunarMap from "./components/LunarMap";
+import MissionAnalysis from "./components/MissionAnalysis";
+import SplitWorkspace from "./components/SplitWorkspace";
+import VisibilityStatistics, { type SearchRegion, type SearchGridCell } from "./components/VisibilityStatistics";
+import ExploreSearch from "./components/ExploreSearch";
 
 type Site = { id: string; name: string; latitude: number; longitude: number };
-type Project = { id: string; name: string; arrival_utc: string; duration_hours: number; sites: Site[] };
+type Project = {
+  id: string; name: string; arrival_utc: string; duration_hours: number;
+  color: string; center_latitude: number; center_longitude: number;
+  radius_m: number; sites: Site[];
+};
+type MissionChanges = {
+  arrival_utc?: string; duration_hours?: number;
+  center_latitude?: number; center_longitude?: number; radius_m?: number;
+};
 type Target = { projectId: string; siteId?: string };
 type Dialog = { action: "project" | "site" | "rename"; target?: Target } | null;
 
 type Props = { children: ReactNode; onClick: () => void; title: string };
 const VISIBILITY_KEY = "orbis-hidden-projects-v1";
+const BROWSE_WIDTH_KEY = "orbis-browse-width-v1";
+const INSPECTOR_WIDTH_KEY = "orbis-inspector-width-v1";
+
+function savedWidth(key: string, fallback: number) {
+  const value = Number(localStorage.getItem(key));
+  return Number.isFinite(value) && value >= 180 && value <= 420 ? value : fallback;
+}
 
 function loadHiddenProjects(): string[] {
   try {
@@ -84,10 +109,14 @@ function Coordinate({
   label,
   value,
   save,
+  min,
+  max,
 }: {
   label: string;
   value: number;
   save: (value: number) => Promise<void>;
+  min?: number;
+  max?: number;
 }) {
   const [draft, setDraft] = useState(String(value));
   const [error, setError] = useState(false);
@@ -107,8 +136,8 @@ function Coordinate({
       setDraft(String(value));
       return;
     }
-    const limit = label === "Latitude" ? 90 : 180;
-    const normalized = Math.min(limit, Math.max(-limit, number));
+    const limit = label.toLowerCase().includes("latitude") ? 90 : 180;
+    const normalized = Math.min(max ?? limit, Math.max(min ?? -limit, number));
     setDraft(String(normalized));
     if (normalized === value) return;
     try {
@@ -155,17 +184,19 @@ function MissionSettings({
   save,
 }: {
   project: Project;
-  save: (changes: { arrival_utc?: string; duration_hours?: number }) => Promise<void>;
+  save: (changes: MissionChanges) => Promise<void>;
 }) {
   const [arrival, setArrival] = useState(project.arrival_utc.slice(0, 16));
   const [duration, setDuration] = useState(String(project.duration_hours));
+  const [radius, setRadius] = useState(String(project.radius_m));
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     setArrival(project.arrival_utc.slice(0, 16));
     setDuration(String(project.duration_hours));
-  }, [project.arrival_utc, project.duration_hours]);
+    setRadius(String(project.radius_m));
+  }, [project.arrival_utc, project.duration_hours, project.radius_m]);
 
   async function saveArrival() {
     if (saving || arrival === project.arrival_utc.slice(0, 16)) return;
@@ -205,9 +236,26 @@ function MissionSettings({
     }
   }
 
+  async function saveRadius() {
+    const next = Number(radius);
+    if (saving || next === project.radius_m) return;
+    if (!Number.isFinite(next) || next < 50 || next > 20000) {
+      setError("Search radius must be 50–20,000 metres.");
+      setRadius(String(project.radius_m));
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try { await save({ radius_m: next }); }
+    catch (reason) {
+      setRadius(String(project.radius_m));
+      setError(reason instanceof Error ? reason.message : "Could not save radius.");
+    } finally { setSaving(false); }
+  }
+
   return (
     <div className="space-y-4 p-3 text-xs">
-      <p className="break-words font-medium text-white">{project.name}</p>
+      <p className="break-words font-medium text-white" style={{ borderLeft: `3px solid ${project.color}`, paddingLeft: 8 }}>{project.name}</p>
       <label className="block text-[#aaa]">
         Arrival (UTC)
         <input
@@ -244,6 +292,22 @@ function MissionSettings({
           {Number(duration) > 0 ? `${(Number(duration) / 24).toFixed(1)} Earth days` : ""}
         </span>
       </label>
+      <div className="space-y-2 border-t border-[#555] pt-3">
+        <p className="text-[#ddd]">Search region</p>
+        <Coordinate key={`${project.id}-center-lat`} label="Center latitude" value={project.center_latitude}
+          min={-90} max={-80} save={value => save({ center_latitude: value })} />
+        <Coordinate key={`${project.id}-center-lon`} label="Center longitude" value={project.center_longitude}
+          save={value => save({ center_longitude: value })} />
+        <label className="block text-[#aaa]">
+          Search radius (m)
+          <input type="number" min={50} max={20000} step={50} value={radius}
+            onChange={event => setRadius(event.target.value)}
+            onBlur={() => void saveRadius()}
+            onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); }}
+            className="mt-1 w-full border border-[#555] bg-[#292929] p-2 text-white outline-none focus:border-accent [color-scheme:dark]" />
+        </label>
+        <p className="text-[11px] text-[#999]">The coloured ring marks the search area, not a verified safe landing zone. Select the project and click the map to move its center.</p>
+      </div>
       {error && <p role="alert" className="text-[#ef9292]">{error}</p>}
       {saving && <p className="text-[#aaa]">Saving...</p>}
     </div>
@@ -252,11 +316,21 @@ function MissionSettings({
 
 function App() {
   const [projects, setProjects] = useState<Project[]>([]);
+  const [workspace, setWorkspace] = useState<"map" | "explore" | "analysis" | "statistics">("map");
+  const [browseOpen, setBrowseOpen] = useState(true);
+  const [inspectorOpen, setInspectorOpen] = useState(true);
   const [hiddenProjects, setHiddenProjects] =
     useState<string[]>(loadHiddenProjects);
   const [connected, setConnected] = useState(false);
   const [clients, setClients] = useState(0);
   const [selected, setSelected] = useState<Target | null>(null);
+  const [regions, setRegions] = useState<{ projectId: string | null; areas: SearchRegion[]; grid: SearchGridCell[]; spacing: number } | null>(null);
+  const [exploreArea, setExploreArea] = useState({ latitude: -85, longitude: 0, radius_m: 10000 });
+  const [browseWidth, setBrowseWidth] = useState(() => savedWidth(BROWSE_WIDTH_KEY, 240));
+  const [inspectorWidth, setInspectorWidth] = useState(() => savedWidth(INSPECTOR_WIDTH_KEY, 280));
+  const resizing = useRef<"browse" | "inspector" | null>(null);
+  const [probePoint, setProbePoint] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [probeMode, setProbeMode] = useState(false);
   const [expanded, setExpanded] = useState<string[]>([]);
   const [search, setSearch] = useState("");
   const [utc, setUtc] = useState("");
@@ -271,6 +345,38 @@ function App() {
   useEffect(() => {
     localStorage.setItem(VISIBILITY_KEY, JSON.stringify(hiddenProjects));
   }, [hiddenProjects]);
+
+  useEffect(() => {
+    localStorage.setItem(BROWSE_WIDTH_KEY, String(browseWidth));
+    localStorage.setItem(INSPECTOR_WIDTH_KEY, String(inspectorWidth));
+  }, [browseWidth, inspectorWidth]);
+
+  function resizePanel(event: PointerEvent<HTMLDivElement>, side: "browse" | "inspector") {
+    if (resizing.current !== side) return;
+    const limit = Math.max(180, Math.min(420, window.innerWidth - 560 -
+      (side === "browse" && inspectorOpen ? inspectorWidth : side === "inspector" && browseOpen ? browseWidth : 0)));
+    const width = side === "browse" ? event.clientX : window.innerWidth - event.clientX;
+    (side === "browse" ? setBrowseWidth : setInspectorWidth)(Math.max(180, Math.min(limit, width)));
+  }
+
+  function resizeHandle(side: "browse" | "inspector") {
+    const width = side === "browse" ? browseWidth : inspectorWidth;
+    return <div role="separator" tabIndex={0} aria-label={`Resize ${side === "browse" ? "Browse" : "Inspector"}`}
+      aria-orientation="vertical" aria-valuemin={180} aria-valuemax={420} aria-valuenow={width}
+      title="Drag to resize · Double-click to reset"
+      className={`group absolute inset-y-0 z-30 w-2 cursor-col-resize touch-none ${side === "browse" ? "-right-1" : "-left-1"}`}
+      onPointerDown={event => { resizing.current = side; event.currentTarget.setPointerCapture(event.pointerId); event.preventDefault(); }}
+      onPointerMove={event => resizePanel(event, side)}
+      onPointerUp={event => { resizing.current = null; event.currentTarget.releasePointerCapture(event.pointerId); }}
+      onPointerCancel={() => { resizing.current = null; }}
+      onDoubleClick={() => (side === "browse" ? setBrowseWidth : setInspectorWidth)(side === "browse" ? 240 : 280)}
+      onKeyDown={event => {
+        const amount = event.key === "ArrowLeft" ? -10 : event.key === "ArrowRight" ? 10 : 0;
+        if (!amount) return;
+        event.preventDefault();
+        (side === "browse" ? setBrowseWidth : setInspectorWidth)(old => Math.max(180, Math.min(420, old + (side === "browse" ? amount : -amount))));
+      }}><span className="absolute inset-y-0 left-1/2 w-px bg-[#50565b] transition-colors group-hover:bg-accent group-focus-visible:bg-accent" /></div>;
+  }
 
   function toggleProjectVisibility(projectId: string) {
     setHiddenProjects((current) =>
@@ -358,6 +464,10 @@ function App() {
   const currentSite = currentProject?.sites.find(
     (site) => site.id === selected?.siteId,
   );
+  const canAnalyze = !!currentProject && (!!currentSite || !!probePoint);
+  useEffect(() => {
+    if (workspace === "analysis" && !canAnalyze) setWorkspace("map");
+  }, [workspace, canAnalyze]);
   const targetName = (target: Target) => {
     const project = projects.find((item) => item.id === target.projectId);
     return target.siteId
@@ -460,23 +570,45 @@ function App() {
 
   async function saveMissionSettings(
     projectId: string,
-    changes: { arrival_utc?: string; duration_hours?: number },
+    changes: MissionChanges,
   ) {
     await request(`/api/projects/${projectId}`, "PATCH", changes);
     await reload();
   }
 
+  async function createFromExplore(name: string, latitude: number, longitude: number,
+    radius_m: number, arrival_utc: string, duration_hours: number,
+    siteLatitude: number, siteLongitude: number) {
+    const project = await request<Project>("/api/projects", "POST", { name });
+    let site: Site;
+    try {
+      await request(`/api/projects/${project.id}`, "PATCH", {
+        center_latitude: latitude, center_longitude: longitude, radius_m, arrival_utc, duration_hours,
+      });
+      site = await request<Site>(`/api/projects/${project.id}/sites`, "POST", {
+        name: "Candidate Site 1",
+      });
+      await request(`/api/projects/${project.id}/sites/${site.id}`, "PATCH", {
+        latitude: siteLatitude, longitude: siteLongitude,
+      });
+    } catch (reason) {
+      await request(`/api/projects/${project.id}`, "DELETE").catch(() => {});
+      throw reason;
+    }
+    await reload();
+    setSelected({ projectId: project.id, siteId: site.id });
+    setProbePoint(null);
+    setExpanded(old => [...new Set([...old, project.id])]);
+    setRegions(null);
+    setWorkspace("map");
+  }
+
   const browse = (
     <>
       <div className="flex h-8 items-center justify-between border-b border-[#484848] px-3 text-xs text-[#b8b8b8]">
-        Browse{" "}
-        <button
-          className="lg:hidden"
-          aria-label="Close Browse"
-          onClick={() => setDrawer(null)}
-        >
-          <X size={16} />
-        </button>
+        Browse
+        <button aria-label="Close Browse" title="Close Browse"
+          onClick={() => { setDrawer(null); setBrowseOpen(false); }}><PanelLeftClose size={16} /></button>
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
         {filtered.map((project) => {
@@ -507,10 +639,11 @@ function App() {
                   className="flex min-w-0 flex-1 items-center gap-2 text-left text-xs"
                   onClick={() => {
                     setSelected({ projectId: project.id });
+                    setProbePoint(null);
                     setDrawer(null);
                   }}
                 >
-                  <Folder size={14} className="shrink-0" />
+                  <Folder size={14} className="shrink-0" style={{ color: project.color }} />
                   <span className="truncate">{project.name}</span>
                 </button>
                 <button
@@ -568,10 +701,11 @@ function App() {
                             projectId: project.id,
                             siteId: site.id,
                           });
+                          setProbePoint(null);
                           setDrawer(null);
                         }}
                       >
-                        <MapPin size={13} className="shrink-0" />
+                        <MapPin size={13} className="shrink-0" style={{ color: project.color }} />
                         <span className="truncate">{site.name}</span>
                       </button>
                       <IconButton
@@ -630,33 +764,24 @@ function App() {
               <X size={15} />
             </button>
           )}
-          <button
-            className="lg:hidden"
-            aria-label="Close Inspector"
-            onClick={() => setDrawer(null)}
-          >
-            <X size={16} />
+          <button aria-label="Close Inspector" title="Close Inspector"
+            onClick={() => { setDrawer(null); setInspectorOpen(false); }}>
+            <PanelRightClose size={16} />
           </button>
         </span>
       </div>
-      {currentSite ? (
+      {currentSite && currentProject ? (
         <div className="space-y-3 p-3">
           <p className="break-words text-xs font-medium">{currentSite.name}</p>
-          <Coordinate
-            key={`${currentSite.id}-lat`}
-            label="Latitude"
-            value={currentSite.latitude}
-            save={(value) => saveCoordinate("latitude", value)}
-          />
-          <Coordinate
-            key={`${currentSite.id}-lon`}
-            label="Longitude"
-            value={currentSite.longitude}
-            save={(value) => saveCoordinate("longitude", value)}
-          />
-          <p className="text-[11px] text-[#999]">
-            Click the map to move this landing site, or drag its marker.
-          </p>
+          <Coordinate key={`${currentSite.id}-lat`} label="Latitude" value={currentSite.latitude}
+            save={value => saveCoordinate("latitude", value)} />
+          <Coordinate key={`${currentSite.id}-lon`} label="Longitude" value={currentSite.longitude}
+            save={value => saveCoordinate("longitude", value)} />
+          <button type="button" onClick={() => { setWorkspace("analysis"); setDrawer(null); }}
+            className="w-full bg-[#03ace4] px-3 py-2 text-left text-xs font-medium text-white hover:bg-[#079bc9]">
+            Open Mission Analysis
+          </button>
+          <p className="text-[11px] text-[#999]">Click the map to move this landing site, or drag its marker.</p>
         </div>
       ) : currentProject ? (
         <MissionSettings
@@ -664,13 +789,18 @@ function App() {
           project={currentProject}
           save={(changes) => saveMissionSettings(currentProject.id, changes)}
         />
-      ) : null}
+      ) : <div className="p-4 text-xs leading-relaxed text-[#aeb5ba]">
+        <p className="font-medium text-[#e4e8ea]">Nothing selected</p>
+        <p className="mt-2">Choose a project or landing site from Browse to see its settings.</p>
+        <button type="button" onClick={() => { setWorkspace("explore"); setProbePoint(null); setDrawer(null); }}
+          className="mt-4 text-accent hover:underline">Explore candidate areas ↗</button>
+      </div>}
     </>
   );
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-[#3d3d3d] text-[#eee]">
-      <header className="flex h-11 shrink-0 items-center justify-between gap-2 border-b border-[#505050] bg-[#242424] px-2">
+      <header className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-[#505050] bg-[#242424] px-2">
         <div className="flex min-w-0 items-center gap-2">
           <button
             className="lg:hidden"
@@ -680,13 +810,15 @@ function App() {
           >
             <Menu size={20} />
           </button>
+          {!browseOpen && <button className="hidden lg:block" aria-label="Open Browse"
+            title="Open Browse" onClick={() => setBrowseOpen(true)}><PanelLeftOpen size={18} /></button>}
           <button
-            className="flex h-7 items-center gap-1 bg-accent px-2 text-xs font-medium text-white"
+            className="flex h-9 items-center gap-1 bg-accent px-2 text-xs font-medium text-white transition-colors hover:bg-[#079bc9]"
             onClick={() => openDialog("project")}
           >
             <Plus size={14} /> CREATE
           </button>
-          <div className="flex h-7 min-w-0 items-center border border-[#444] bg-[#353535] px-2">
+          <div className="flex h-9 min-w-0 items-center border border-[#444] bg-[#353535] px-2 focus-within:border-accent">
             <Search size={14} className="shrink-0 text-[#888]" />
             <input
               className="w-20 min-w-0 bg-transparent px-2 text-xs outline-none sm:w-40"
@@ -702,7 +834,7 @@ function App() {
             )}
           </div>
         </div>
-        <div className="flex shrink-0 items-center gap-3 text-[11px] text-[#ccc]">
+        <div className="flex shrink-0 items-center gap-2 text-[11px] text-[#ccc] sm:gap-3">
           <span
             className="flex items-center gap-1.5"
             title={connected ? "API connected" : "API disconnected"}
@@ -720,6 +852,8 @@ function App() {
             {clients}
           </span>
           <span className="hidden font-mono text-[10px] md:inline">{utc}</span>
+          {!inspectorOpen && <button className="hidden lg:block" aria-label="Open Inspector"
+            title="Open Inspector" onClick={() => setInspectorOpen(true)}><PanelRightOpen size={18} /></button>}
           <button
             className="lg:hidden"
             title="Inspector"
@@ -731,27 +865,98 @@ function App() {
         </div>
       </header>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[220px_minmax(0,1fr)_260px]">
-        <aside className="hidden min-h-0 flex-col border-r border-[#505050] bg-[#3b3b3b] lg:flex">
+      <div className="orbis-shell min-h-0 flex-1"
+        style={{ "--shell-columns": `${browseOpen ? `${browseWidth}px ` : ""}minmax(0,1fr)${inspectorOpen ? ` ${inspectorWidth}px` : ""}` } as CSSProperties}>
+        <aside className={`relative min-h-0 flex-col border-r border-[#505050] bg-[#303336] ${browseOpen ? "hidden lg:flex" : "hidden"}`}>
           {browse}
+          {browseOpen && resizeHandle("browse")}
         </aside>
-        <main
-          className="min-h-0 min-w-0 overflow-hidden bg-[#191919]"
-          aria-label="Lunar south pole map"
-        >
-          <LunarMap
-            projects={projects}
-            hiddenProjectIds={hiddenProjects}
-            selected={selected}
-            onSelectSite={(target) => {
-              setSelected(target);
-              setDrawer(null);
-            }}
-            onMoveSite={moveLandingSite}
+        <main className="flex min-h-0 min-w-0 flex-col overflow-hidden bg-[#191919]" aria-label="Lunar mission workspace">
+          <div className="orbis-scroll flex h-11 min-w-0 shrink-0 items-center gap-1 overflow-x-auto border-b border-[#505050] bg-[#242424] px-2 text-xs">
+            <button type="button" onClick={() => { setWorkspace("map"); setProbeMode(false); }}
+              className={`h-9 shrink-0 border-b-2 px-3 transition-colors ${workspace === "map" ? "border-accent bg-[#363636] text-white" : "border-transparent text-[#aaa] hover:bg-[#333] hover:text-white"}`}>
+              Map
+            </button>
+            <button type="button" onClick={() => { setWorkspace("explore"); setProbePoint(null); setProbeMode(false); }}
+              className={`h-9 shrink-0 border-b-2 px-3 transition-colors ${workspace === "explore" ? "border-accent bg-[#363636] text-white" : "border-transparent text-[#aaa] hover:bg-[#333] hover:text-white"}`}>
+              Explore
+            </button>
+            <button type="button" onClick={() => { setWorkspace("analysis"); setProbeMode(false); }}
+              disabled={!canAnalyze}
+              title={!canAnalyze ? "Select a landing site or inspect a point first" : "Analyze selected point"}
+              className={`h-9 shrink-0 border-b-2 px-3 transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${workspace === "analysis" ? "border-accent bg-[#363636] text-white" : "border-transparent text-[#aaa] hover:bg-[#333] hover:text-white"}`}>
+              Mission Analysis
+            </button>
+            <button type="button" onClick={() => { setWorkspace("statistics"); setProbeMode(false); }}
+              disabled={!currentProject}
+              className={`h-9 shrink-0 border-b-2 px-3 transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${workspace === "statistics" ? "border-accent bg-[#363636] text-white" : "border-transparent text-[#aaa] hover:bg-[#333] hover:text-white"}`}>
+              Statistics
+            </button>
+          </div>
+          <SplitWorkspace
+            active={workspace === "explore" || (workspace !== "map" && !!currentProject)}
+            primary={
+              <LunarMap
+                projects={projects}
+                hiddenProjectIds={hiddenProjects}
+                selected={selected}
+                regions={workspace === "explore" ? regions?.projectId === null ? regions : null : regions?.projectId ? regions : null}
+                exploreArea={workspace === "explore" ? exploreArea : null}
+                probePoint={workspace === "explore" ? null : probePoint}
+                probeMode={probeMode}
+                onProbePoint={point => {
+                  if (workspace === "explore") {
+                    setExploreArea(current => ({ ...current, ...point }));
+                    setRegions(null);
+                  } else setProbePoint(point);
+                  setProbeMode(false);
+                }}
+                onMoveProjectCenter={async (projectId, lat, lon) => {
+                  await saveMissionSettings(projectId, { center_latitude: lat, center_longitude: lon });
+                }}
+                onMoveExploreArea={(latitude, longitude) => {
+                  setExploreArea(current => ({ ...current, latitude, longitude }));
+                  setRegions(null);
+                  setProbeMode(false);
+                }}
+                onSelectSite={(target) => {
+                  setSelected(target);
+                  setProbePoint(null);
+                  setDrawer(null);
+                }}
+                onMoveSite={moveLandingSite}
+              />
+            }
+            secondary={workspace === "explore" ? (
+              <div className="orbis-scroll h-full overflow-y-auto overscroll-contain bg-[#25282a] p-4 sm:p-5">
+                <ExploreSearch area={exploreArea}
+                  onAreaChange={area => { setExploreArea(area); setRegions(null); }}
+                  onRegions={(areas, grid, spacing) => setRegions({ projectId: null, areas, grid, spacing })}
+                  onCreateProject={createFromExplore} />
+              </div>
+            ) : currentProject && workspace === "statistics" ? (
+              <div className="orbis-scroll h-full overflow-y-auto overscroll-contain bg-[#252525] p-2.5 sm:p-3">
+                <VisibilityStatistics key={`${currentProject.id}-${currentSite?.id ?? "center"}`}
+                  latitude={currentSite?.latitude ?? currentProject.center_latitude}
+                  longitude={currentSite?.longitude ?? currentProject.center_longitude}
+                  arrivalUtc={currentProject.arrival_utc} durationHours={currentProject.duration_hours}
+                  project={currentProject} probePoint={probePoint}
+                  onProbePoint={point => { setProbePoint(point); setProbeMode(false); }} onProbeMode={setProbeMode}
+                  onSaveMission={changes => saveMissionSettings(currentProject.id, changes)}
+                  onRegions={(projectId, areas, grid, spacing) => setRegions({ projectId, areas, grid, spacing })} />
+              </div>
+            ) : canAnalyze && currentProject ? (
+              <MissionAnalysis key={`${currentProject.id}-${currentSite?.id ?? "center"}`}
+                latitude={probePoint?.latitude ?? currentSite!.latitude}
+                longitude={probePoint?.longitude ?? currentSite!.longitude}
+                arrivalUtc={currentProject.arrival_utc} durationHours={currentProject.duration_hours}
+                siteName={probePoint ? "Inspected point" : currentSite!.name} />
+            ) : null}
           />
         </main>
-        <aside className="hidden min-h-0 flex-col border-l border-[#505050] bg-[#3b3b3b] lg:flex">
+        <aside className={`relative min-h-0 flex-col border-l border-[#505050] bg-[#303336] ${inspectorOpen ? "hidden lg:flex" : "hidden"}`}>
           {inspector}
+          {inspectorOpen && resizeHandle("inspector")}
         </aside>
       </div>
 

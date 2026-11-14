@@ -21,8 +21,71 @@ body,
 
 body {
   overflow: hidden;
+  background: #191919;
 }
 
 button {
   cursor: pointer;
+}
+
+button:focus-visible,
+summary:focus-visible {
+  outline: 2px solid #03ace4;
+  outline-offset: 2px;
+}
+
+input:focus-visible {
+  outline: none;
+  border-color: #03ace4;
+}
+
+.orbis-panel {
+  border: 1px solid #454b50;
+  border-radius: 4px;
+  background: #2a2c2e;
+}
+
+.orbis-explore :is(input, button, summary) {
+  font-family: inherit;
+}
+
+.orbis-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (min-width: 1024px) {
+  .orbis-shell {
+    grid-template-columns: var(--shell-columns);
+  }
+}
+
+.orbis-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #606f79 #252525;
+}
+
+.orbis-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.orbis-scroll::-webkit-scrollbar-track {
+  background: #252525;
+}
+
+.orbis-scroll::-webkit-scrollbar-thumb {
+  background: #606f79;
+  border: 2px solid #252525;
+  border-radius: 8px;
+}
+
+.orbis-scroll::-webkit-scrollbar-thumb:hover {
+  background: #03ace4;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
 }
