@@ -1,5 +1,6 @@
 import sqlite3
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from inspect import isawaitable
 from uuid import uuid4
 
@@ -20,6 +21,11 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="ORBIS API", lifespan=lifespan)
 app.include_router(terrain_router)
 
+
+def utc_string(value: datetime) -> str:
+    return value.astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
 class NameRequest(BaseModel):
     name: str = Field(min_length=1, max_length=100)
 
@@ -29,6 +35,29 @@ class NameRequest(BaseModel):
         value = value.strip()
         if not value:
             raise ValueError("Name cannot be empty")
+        return value
+
+
+class ProjectUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    arrival_utc: datetime | None = None
+    duration_hours: int | None = Field(default=None, ge=1, le=8760)
+
+    @field_validator("name")
+    @classmethod
+    def clean_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            raise ValueError("Name cannot be empty")
+        return value
+
+    @field_validator("arrival_utc")
+    @classmethod
+    def require_timezone(cls, value: datetime | None) -> datetime | None:
+        if value is not None and (value.tzinfo is None or value.utcoffset() is None):
+            raise ValueError("Arrival time must contain a timezone (UTC recommended)")
         return value
 
 
@@ -71,6 +100,8 @@ def get_project(project_id: str):
     return {
         "id": project["id"],
         "name": project["name"],
+        "arrival_utc": project["arrival_utc"],
+        "duration_hours": project["duration_hours"],
         "sites": [site_data(site) for site in sites],
     }
 
@@ -87,7 +118,6 @@ def get_site(project_id: str, site_id: str):
 
 
 async def broadcast_presence():
-    # A "user" is currently one browser WebSocket connection, not an account.
     for client in tuple(manager.connections):
         try:
             await client.send_json({
@@ -117,11 +147,12 @@ def list_projects():
 @app.post("/api/projects", status_code=201)
 async def create_project(data: NameRequest):
     project_id = str(uuid4())
+    now = utc_string(datetime.now(timezone.utc))
     try:
         with get_connection() as connection:
             connection.execute(
-                "INSERT INTO projects (id, name) VALUES (?, ?)",
-                (project_id, data.name),
+                "INSERT INTO projects (id, name, arrival_utc, duration_hours) VALUES (?, ?, ?, ?)",
+                (project_id, data.name, now, 336),
             )
     except sqlite3.IntegrityError:
         raise HTTPException(409, "Project name already exists")
@@ -131,16 +162,26 @@ async def create_project(data: NameRequest):
 
 
 @app.patch("/api/projects/{project_id}")
-async def rename_project(project_id: str, data: NameRequest):
+async def update_project(project_id: str, data: ProjectUpdate):
     get_project(project_id)
+    changes = data.model_dump(exclude_unset=True)
+    if any(value is None for value in changes.values()):
+        raise HTTPException(422, "Fields cannot be null")
+    if not changes:
+        return get_project(project_id)
+    if "arrival_utc" in changes:
+        changes["arrival_utc"] = utc_string(changes["arrival_utc"])
+
+    columns = ", ".join(f"{key} = ?" for key in changes)
     try:
         with get_connection() as connection:
             connection.execute(
-                "UPDATE projects SET name = ? WHERE id = ?",
-                (data.name, project_id),
+                f"UPDATE projects SET {columns} WHERE id = ?",
+                [*changes.values(), project_id],
             )
     except sqlite3.IntegrityError:
-        raise HTTPException(409, "Project name already exists")
+        raise HTTPException(409, "Invalid or duplicate project data")
+
     result = get_project(project_id)
     await manager.broadcast("projects_changed")
     return result
@@ -185,7 +226,6 @@ async def update_site(project_id: str, site_id: str, data: SiteUpdate):
     if not changes:
         return get_site(project_id, site_id)
 
-    # Keys are restricted to the Pydantic model's known field names.
     columns = ", ".join(f"{key} = ?" for key in changes)
     values = [*changes.values(), site_id, project_id]
     try:

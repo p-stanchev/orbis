@@ -319,10 +319,10 @@ export default function LunarMap({ projects, hiddenProjectIds, selected, onSelec
         )}
       </div>
 
-      <div className="pointer-events-none absolute left-3 top-3 z-20 bg-[#242424]/95 px-3 py-2 text-[11px]">
+      <div className="pointer-events-none absolute left-2 top-3 z-20 bg-[#242424]/95 px-2 py-2 text-[10px] sm:left-3 sm:px-3 sm:text-[11px]">
         LUNAR SOUTH POLE <span className="ml-1 text-[#aaa]">80°S–90°S</span>
       </div>
-      <div className="absolute right-3 top-12 z-20 flex gap-1 bg-[#242424]/95 p-1 sm:top-3">
+      <div className="absolute right-2 top-3 z-20 flex gap-0.5 bg-[#242424]/95 p-1 sm:right-3 sm:gap-1">
         <button className={`flex h-8 items-center gap-1 px-2 text-xs ${shadows ? "bg-[#444] text-accent" : "text-[#aaa]"}`}
           type="button" aria-label="Toggle permanent shadows" aria-pressed={shadows}
           onClick={() => setShadows(!shadows)}><Layers size={15} /> PSR</button>

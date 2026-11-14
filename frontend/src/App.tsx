@@ -25,7 +25,7 @@ import {
 import LunarMap from "./components/LunarMap";
 
 type Site = { id: string; name: string; latitude: number; longitude: number };
-type Project = { id: string; name: string; sites: Site[] };
+type Project = { id: string; name: string; arrival_utc: string; duration_hours: number; sites: Site[] };
 type Target = { projectId: string; siteId?: string };
 type Dialog = { action: "project" | "site" | "rename"; target?: Target } | null;
 
@@ -147,6 +147,106 @@ function Coordinate({
         </span>
       )}
     </label>
+  );
+}
+
+function MissionSettings({
+  project,
+  save,
+}: {
+  project: Project;
+  save: (changes: { arrival_utc?: string; duration_hours?: number }) => Promise<void>;
+}) {
+  const [arrival, setArrival] = useState(project.arrival_utc.slice(0, 16));
+  const [duration, setDuration] = useState(String(project.duration_hours));
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setArrival(project.arrival_utc.slice(0, 16));
+    setDuration(String(project.duration_hours));
+  }, [project.arrival_utc, project.duration_hours]);
+
+  async function saveArrival() {
+    if (saving || arrival === project.arrival_utc.slice(0, 16)) return;
+    const date = new Date(`${arrival}:00Z`);
+    if (!arrival || !Number.isFinite(date.getTime())) {
+      setError("Enter a valid UTC date and time.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      await save({ arrival_utc: date.toISOString() });
+    } catch (reason) {
+      setArrival(project.arrival_utc.slice(0, 16));
+      setError(reason instanceof Error ? reason.message : "Could not save arrival time.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveDuration() {
+    if (saving || duration === String(project.duration_hours)) return;
+    const hours = Number(duration);
+    if (!Number.isInteger(hours) || hours < 1 || hours > 8760) {
+      setError("Duration must be 1–8760 hours.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      await save({ duration_hours: hours });
+    } catch (reason) {
+      setDuration(String(project.duration_hours));
+      setError(reason instanceof Error ? reason.message : "Could not save duration.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="space-y-4 p-3 text-xs">
+      <p className="break-words font-medium text-white">{project.name}</p>
+      <label className="block text-[#aaa]">
+        Arrival (UTC)
+        <input
+          type="datetime-local"
+          aria-label="Mission arrival in UTC"
+          value={arrival}
+          onChange={(event) => setArrival(event.target.value)}
+          onBlur={() => void saveArrival()}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") event.currentTarget.blur();
+          }}
+          style={{ colorScheme: "dark" }}
+          className="mt-1 w-full min-w-0 border border-[#555] bg-[#292929] p-2 text-white outline-none focus:border-accent"
+        />
+      </label>
+      <label className="block text-[#aaa]">
+        Mission duration (hours)
+        <input
+          type="number"
+          min={1}
+          max={8760}
+          step={1}
+          aria-label="Mission duration in hours"
+          value={duration}
+          onChange={(event) => setDuration(event.target.value)}
+          onBlur={() => void saveDuration()}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") event.currentTarget.blur();
+          }}
+          style={{ colorScheme: "dark" }}
+          className="mt-1 w-full border border-[#555] bg-[#292929] p-2 text-white outline-none focus:border-accent"
+        />
+        <span className="mt-1 block text-[10px] text-[#888]">
+          {Number(duration) > 0 ? `${(Number(duration) / 24).toFixed(1)} Earth days` : ""}
+        </span>
+      </label>
+      {error && <p role="alert" className="text-[#ef9292]">{error}</p>}
+      {saving && <p className="text-[#aaa]">Saving...</p>}
+    </div>
   );
 }
 
@@ -358,6 +458,14 @@ function App() {
     await reload();
   }
 
+  async function saveMissionSettings(
+    projectId: string,
+    changes: { arrival_utc?: string; duration_hours?: number },
+  ) {
+    await request(`/api/projects/${projectId}`, "PATCH", changes);
+    await reload();
+  }
+
   const browse = (
     <>
       <div className="flex h-8 items-center justify-between border-b border-[#484848] px-3 text-xs text-[#b8b8b8]">
@@ -551,10 +659,11 @@ function App() {
           </p>
         </div>
       ) : currentProject ? (
-        <p className="p-3 text-xs text-[#aaa]">
-          {currentProject.name}
-          <span className="mt-2 block">Select a landing site.</span>
-        </p>
+        <MissionSettings
+          key={currentProject.id}
+          project={currentProject}
+          save={(changes) => saveMissionSettings(currentProject.id, changes)}
+        />
       ) : null}
     </>
   );

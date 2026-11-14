@@ -1,4 +1,5 @@
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
 DATABASE_PATH = Path(__file__).resolve().parent.parent / "data" / "orbis.db"
@@ -18,7 +19,10 @@ def initialize_database():
         connection.execute("""
             CREATE TABLE IF NOT EXISTS projects (
                 id TEXT PRIMARY KEY,
-                name TEXT NOT NULL UNIQUE COLLATE NOCASE
+                name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                arrival_utc TEXT,
+                duration_hours INTEGER NOT NULL DEFAULT 336
+                    CHECK(duration_hours BETWEEN 1 AND 8760)
             )
         """)
 
@@ -37,3 +41,21 @@ def initialize_database():
                 UNIQUE (project_id, name)
             )
         """)
+
+        existing = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(projects)")
+        }
+
+        if "arrival_utc" not in existing:
+            connection.execute("ALTER TABLE projects ADD COLUMN arrival_utc TEXT")
+        if "duration_hours" not in existing:
+            connection.execute(
+                "ALTER TABLE projects ADD COLUMN duration_hours INTEGER NOT NULL DEFAULT 336"
+            )
+
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+        connection.execute(
+            "UPDATE projects SET arrival_utc = ? WHERE arrival_utc IS NULL",
+            (now,),
+        )
