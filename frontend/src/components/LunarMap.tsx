@@ -10,6 +10,7 @@ type Marker = { id: string; u: number; v: number };
 type Point = { latitude: number; longitude: number; u: number; v: number };
 type Props = {
   projects: Project[];
+  hiddenProjectIds: string[];
   selected: Target | null;
   onSelectSite: (target: Target | null) => void;
   onMoveSite: (target: Target, latitude: number, longitude: number) => Promise<void>;
@@ -26,7 +27,7 @@ type Gesture = {
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
-export default function LunarMap({ projects, selected, onSelectSite, onMoveSite }: Props) {
+export default function LunarMap({ projects, hiddenProjectIds, selected, onSelectSite, onMoveSite }: Props) {
   const viewport = useRef<HTMLDivElement>(null);
   const map = useRef<HTMLDivElement>(null);
   const pointers = useRef(new Map<number, Pointer>());
@@ -48,7 +49,8 @@ export default function LunarMap({ projects, selected, onSelectSite, onMoveSite 
     id: site.id, latitude: site.latitude, longitude: site.longitude,
   })));
   const siteKey = JSON.stringify(siteList);
-  const projectSites = projects.flatMap(project => project.sites.map(site => ({
+  const projectSites = projects.filter(project => !hiddenProjectIds.includes(project.id))
+    .flatMap(project => project.sites.map(site => ({
     target: { projectId: project.id, siteId: site.id }, site,
   })));
 
