@@ -3,6 +3,7 @@ import {
   ChevronDown, ChevronRight, Folder, MapPin, Menu, MoreHorizontal,
   Pencil, Plus, Search, SlidersHorizontal, Trash2, Users, X,
 } from "lucide-react";
+import LunarMap from "./components/LunarMap";
 
 type Site = { id: string; name: string; latitude: number; longitude: number };
 type Project = { id: string; name: string; sites: Site[] };
@@ -115,6 +116,17 @@ function App() {
     return () => { stopped = true; clearTimeout(retry); socket?.close(); };
   }, [reload]);
 
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !dialog && !deleting && !drawer) {
+        setSelected(null);
+        setMenu(null);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [dialog, deleting, drawer]);
+
   const currentProject = projects.find(project => project.id === selected?.projectId);
   const currentSite = currentProject?.sites.find(site => site.id === selected?.siteId);
   const targetName = (target: Target) => {
@@ -172,6 +184,12 @@ function App() {
     await reload();
   }
 
+  async function moveLandingSite(target: Target, latitude: number, longitude: number) {
+    if (!target.siteId) return;
+    await request(urlFor(target), "PATCH", { latitude, longitude });
+    await reload();
+  }
+
   const browse = <>
     <div className="flex h-8 items-center justify-between border-b border-[#484848] px-3 text-xs text-[#b8b8b8]">
       Browse <button className="lg:hidden" aria-label="Close Browse" onClick={() => setDrawer(null)}><X size={16} /></button>
@@ -209,13 +227,17 @@ function App() {
 
   const inspector = <>
     <div className="flex h-8 items-center justify-between border-b border-[#484848] px-3 text-xs text-[#b8b8b8]">
-      Inspector <button className="lg:hidden" aria-label="Close Inspector" onClick={() => setDrawer(null)}><X size={16} /></button>
+      <span>Inspector</span>
+      <span className="flex items-center gap-3">
+        {selected && <button type="button" title="Clear selection" aria-label="Clear selection" onClick={() => setSelected(null)}><X size={15} /></button>}
+        <button className="lg:hidden" aria-label="Close Inspector" onClick={() => setDrawer(null)}><X size={16} /></button>
+      </span>
     </div>
     {currentSite ? <div className="space-y-3 p-3">
       <p className="break-words text-xs font-medium">{currentSite.name}</p>
       <Coordinate key={`${currentSite.id}-lat`} label="Latitude" value={currentSite.latitude} save={value => saveCoordinate("latitude", value)} />
       <Coordinate key={`${currentSite.id}-lon`} label="Longitude" value={currentSite.longitude} save={value => saveCoordinate("longitude", value)} />
-      <p className="text-[11px] text-[#999]">3D lunar terrain will appear in the workspace.</p>
+      <p className="text-[11px] text-[#999]">Click the map to move this landing site, or drag its marker.</p>
     </div> : currentProject ? <p className="p-3 text-xs text-[#aaa]">{currentProject.name}<span className="mt-2 block">Select a landing site.</span></p> : null}
   </>;
 
@@ -240,7 +262,14 @@ function App() {
 
     <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[220px_minmax(0,1fr)_260px]">
       <aside className="hidden min-h-0 flex-col border-r border-[#505050] bg-[#3b3b3b] lg:flex">{browse}</aside>
-      <main className="min-w-0 bg-[#414141]" aria-label="3D lunar workspace" />
+      <main className="min-h-0 min-w-0 overflow-hidden bg-[#191919]" aria-label="Lunar south pole map">
+        <LunarMap
+          projects={projects}
+          selected={selected}
+          onSelectSite={target => { setSelected(target); setDrawer(null); }}
+          onMoveSite={moveLandingSite}
+        />
+      </main>
       <aside className="hidden min-h-0 flex-col border-l border-[#505050] bg-[#3b3b3b] lg:flex">{inspector}</aside>
     </div>
 

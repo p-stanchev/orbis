@@ -1,0 +1,14 @@
+{
+  "elevation": {
+    "file": "LDEM_80S_80MPP_ADJ.tiff",
+    "source": "https://pgda.gsfc.nasa.gov/products/90"
+  },
+  "hillshade": {
+    "file": "LDEM_80S_80MPP_ADJ_HILL.tiff",
+    "source": "https://pgda.gsfc.nasa.gov/products/90"
+  },
+  "permanent_shadows": {
+    "file": "LPSR_80S_20MPP_ADJ.tiff",
+    "source": "https://pgda.gsfc.nasa.gov/products/90"
+  }
+}

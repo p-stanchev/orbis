@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from database import get_connection, initialize_database
 from realtime import manager
+from terrain import router as terrain_router
 
 
 @asynccontextmanager
@@ -17,7 +18,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="ORBIS API", lifespan=lifespan)
-
+app.include_router(terrain_router)
 
 class NameRequest(BaseModel):
     name: str = Field(min_length=1, max_length=100)

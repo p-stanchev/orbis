@@ -32,3 +32,6 @@ __pycache__/
 *.db
 *.db-shm
 *.db-wal
+
+# NASA datasets
+/data/source/
