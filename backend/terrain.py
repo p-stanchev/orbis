@@ -57,9 +57,21 @@ def sample_slope(src, forward, latitude: float, longitude: float, high_resolutio
         valid = footprint & neighbors & np.isfinite(slopes)
     if np.count_nonzero(valid) / np.count_nonzero(footprint) < 0.75:
         return None
-    return {"slope_p90_deg": round(float(np.percentile(slopes[valid], 90)), 1),
-            "footprint_radius_m": radius, "resolution_m": 5 if high_resolution else 80,
-            "dataset": "LOLA 5 m slope raster" if high_resolution else "LOLA 80 m elevation-derived slope"}
+    result = {"slope_p90_deg": round(float(np.percentile(slopes[valid], 90)), 1),
+              "footprint_radius_m": radius, "resolution_m": 5 if high_resolution else 80,
+              "dataset": "LOLA 5 m slope raster" if high_resolution else "LOLA 80 m elevation-derived slope"}
+    if not high_resolution:
+        surface = footprint & raw_valid
+        rows, columns = np.nonzero(surface)
+        easting = (columns - edge) * abs(src.res[0])
+        northing = (rows - edge) * abs(src.res[1])
+        heights = values.data[surface].astype(float)
+        plane = np.column_stack((np.ones(len(heights)), easting, northing))
+        coefficients = np.linalg.lstsq(plane, heights, rcond=None)[0]
+        residual = heights - plane @ coefficients
+        result["roughness_rms_m"] = round(float(np.sqrt(np.mean(residual ** 2))), 2)
+        result["elevation_m"] = round(float(values.data[edge, edge]), 1) if raw_valid[edge, edge] else None
+    return result
 
 
 def region_slopes(locations: list[tuple[float, float]]):
@@ -73,8 +85,12 @@ def region_slopes(locations: list[tuple[float, float]]):
         high_forward = Transformer.from_crs(high.crs.geodetic_crs, high.crs, always_xy=True) if high else None
         results = []
         for latitude, longitude in locations:
-            found = sample_slope(high, high_forward, latitude, longitude, True) if high and latitude <= -87 else None
-            results.append(found or sample_slope(elevation, elevation_forward, latitude, longitude, False))
+            coarse = sample_slope(elevation, elevation_forward, latitude, longitude, False)
+            fine = sample_slope(high, high_forward, latitude, longitude, True) if high and latitude <= -87 else None
+            if fine is not None:
+                fine["roughness_rms_m"] = coarse["roughness_rms_m"] if coarse else None
+                fine["elevation_m"] = coarse["elevation_m"] if coarse else None
+            results.append(fine or coarse)
         return results
 
 

@@ -43,6 +43,8 @@ export type SearchRegion = { center_latitude: number; center_longitude: number; 
   sun_range: [number, number]; earth_range: [number, number];
   slope_known_cells?: number | null; slope_unchecked_cells?: number | null;
   representative_slope_deg?: number | null; representative_slope_resolution_m?: number | null;
+  roughness_known_cells?: number; roughness_unchecked_cells?: number;
+  roughness_p90_m?: number | null; elevation_mean_m?: number | null;
   cells: { latitude: number; longitude: number; score: number }[] };
 export type SearchGridCell = { latitude: number; longitude: number; score: number | null;
   band: "green" | "yellow" | "red";
@@ -52,6 +54,9 @@ type Region = { regions: SearchRegion[]; grid: SearchGridCell[]; sample_count: n
   slope_limit_deg?: number | null; slope_screened_cells?: number | null;
   slope_5m_cells?: number | null; slope_80m_cells?: number | null;
   slope_unchecked_cells?: number | null; slope_excluded_cells?: number | null; slope_warning?: string | null;
+  roughness_limit_m?: number | null; roughness_screened_cells?: number | null;
+  roughness_unchecked_cells?: number | null; roughness_excluded_cells?: number | null;
+  surface_measured_cells?: number;
   color_mode: "mission_needs" | "relative_visibility"; model: string };
 type RegionJob = { id: string; status: "running" | "completed" | "failed"; progress: number; result: Region | null; error: string | null };
 type Props = { latitude: number; longitude: number; arrivalUtc: string; durationHours: number;
@@ -124,6 +129,7 @@ export default function VisibilityStatistics({ latitude, longitude, arrivalUtc, 
   const [controls, setControls] = useState({ sun_weight: 70, max_no_sun_hours: null as number | null,
     max_no_earth_hours: null as number | null, min_daily_earth_hours: 0,
     max_slope_deg: null as number | null,
+    max_roughness_m: null as number | null,
     min_area_km2: Math.min(4, Math.max(0.001, Math.PI * (project.radius_m / 1000) ** 2 / 4)) });
   const [parameters, setParameters] = useState(controls);
   const [pointLat, setPointLat] = useState("");
@@ -289,7 +295,8 @@ export default function VisibilityStatistics({ latitude, longitude, arrivalUtc, 
     return () => { controller.abort(); window.clearTimeout(timeout); };
   }, [project.id, project.center_latitude, project.center_longitude, project.radius_m, arrivalUtc, durationHours,
     parameters.sun_weight, parameters.max_no_sun_hours, parameters.max_no_earth_hours,
-    parameters.min_daily_earth_hours, parameters.min_area_km2, parameters.max_slope_deg, retry]);
+    parameters.min_daily_earth_hours, parameters.min_area_km2, parameters.max_slope_deg,
+    parameters.max_roughness_m, retry]);
 
   return (
     <div className="orbis-statistics mx-auto max-w-[1200px] space-y-3 pb-3 text-xs leading-relaxed">
@@ -469,9 +476,16 @@ export default function VisibilityStatistics({ latitude, longitude, arrivalUtc, 
                 max_slope_deg: event.target.value === "" ? null : Math.max(0, Math.min(90, Number(event.target.value))) }))}
               className="mt-1 w-full border border-[#555] bg-[#292929] p-2 text-white [color-scheme:dark]" />
           </label>
+          <label className="text-[#aaa]">Maximum roughness (m)
+            <input type="number" min={0} max={1000} step={0.1} placeholder="No roughness filter"
+              value={controls.max_roughness_m ?? ""}
+              onChange={event => setControls(current => ({ ...current,
+                max_roughness_m: event.target.value === "" ? null : Math.max(0, Math.min(1000, Number(event.target.value))) }))}
+              className="mt-1 w-full border border-[#555] bg-[#292929] p-2 text-white [color-scheme:dark]" />
+          </label>
         </div>
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="text-[10px] text-[#aaa]">Blank slope leaves it out. If slope is unavailable at a cell, that cell skips the filter and is marked unchecked.</p>
+          <p className="text-[10px] text-[#aaa]">Blank terrain limits leave them out. Missing slope or roughness skips that filter for the cell and is marked unchecked.</p>
           <button type="button" disabled={region?.status === "running"}
             onClick={() => { setParameters(controls); setRetry(value => value + 1); }}
             className="min-h-9 bg-[#03ace4] px-3 py-1.5 text-white hover:bg-[#079bc9] disabled:opacity-50">Search region</button>
@@ -483,13 +497,17 @@ export default function VisibilityStatistics({ latitude, longitude, arrivalUtc, 
             <span><span className="mr-1.5 inline-block h-2 w-2 rounded-full bg-[#60ba7b]" />{region.result.color_mode === "mission_needs" ? "Meets limits" : "≥70%"}</span>
             <span><span className="mr-1.5 inline-block h-2 w-2 rounded-full bg-[#ff9900]" />{region.result.color_mode === "mission_needs" ? "Close to limits" : "35–70%"}</span>
             <span><span className="mr-1.5 inline-block h-2 w-2 rounded-full bg-[#da0004]" />{region.result.color_mode === "mission_needs" ? "Outside limits" : "<35%"}</span>
-            {region.result.slope_limit_deg != null && (region.result.slope_unchecked_cells ?? 0) > 0 &&
-              <span><span className="mr-1.5 inline-block h-2 w-2 rounded-full bg-[#879199]" />Slope unchecked</span>}
+            {((region.result.slope_limit_deg != null && (region.result.slope_unchecked_cells ?? 0) > 0) ||
+              (region.result.roughness_limit_m != null && (region.result.roughness_unchecked_cells ?? 0) > 0)) &&
+              <span><span className="mr-1.5 inline-block h-2 w-2 rounded-full bg-[#879199]" />Terrain unchecked</span>}
           </div>
           <div className="flex flex-wrap gap-3 text-[10px] text-[#aaa]"><span>{region.result.evaluated_cells} cells · {region.result.grid_spacing_m} m spacing</span><span>{region.result.regions.length} candidate patches</span>
-            {region.result.outside_coverage_cells > 0 && <span>{region.result.outside_coverage_cells} outside DEM</span>}</div>
-          {region.result.slope_limit_deg != null && <p className="text-[10px] text-[#bbb]">Slope ≤{region.result.slope_limit_deg}°: {region.result.slope_screened_cells} screened ({region.result.slope_5m_cells} at 5 m, {region.result.slope_80m_cells} at 80 m), {region.result.slope_excluded_cells} too steep, {region.result.slope_unchecked_cells} unchecked. Unchecked cells skip this filter and appear gray on the map. {region.result.slope_warning}</p>}
-          {!region.result.regions.length && <p className="text-[#bbb]">No patch of this size passes the available filters. Try a smaller minimum area or review the slope limit.</p>}
+            {region.result.outside_coverage_cells > 0 && <span>{region.result.outside_coverage_cells} outside DEM</span>}
+            {region.result.surface_measured_cells !== undefined && <span>{region.result.surface_measured_cells} with coarse surface measurements</span>}</div>
+          {region.result.slope_limit_deg != null && <p className="text-[10px] text-[#bbb]">Slope ≤{region.result.slope_limit_deg}°: {region.result.slope_screened_cells} screened ({region.result.slope_5m_cells} at 5 m, {region.result.slope_80m_cells} at 80 m), {region.result.slope_excluded_cells} too steep, {region.result.slope_unchecked_cells} unchecked. Unchecked cells skip this filter and appear gray on the map.</p>}
+          {region.result.roughness_limit_m != null && <p className="text-[10px] text-[#bbb]">Roughness ≤{region.result.roughness_limit_m} m: {region.result.roughness_screened_cells} screened, {region.result.roughness_excluded_cells} above limit, {region.result.roughness_unchecked_cells} unchecked. Based on 80 m elevations within 400 m; smaller hazards are unresolved.</p>}
+          {region.result.slope_warning && <p role="status" className="text-[10px] text-[#ffbf70]">{region.result.slope_warning}</p>}
+          {!region.result.regions.length && <p className="text-[#bbb]">No patch of this size passes the available filters. Try a smaller minimum area or review the terrain limits.</p>}
           <div className="space-y-1">{region.result.regions.map((area, index) => (
             <div key={`${area.center_latitude}-${area.center_longitude}`} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-sm border-l-2 bg-[#30343a] px-3 py-2"
               style={{ borderColor: area.band === "green" ? "#60ba7b" : area.band === "yellow" ? "#ff9900" : "#da0004" }}>
@@ -505,11 +523,12 @@ export default function VisibilityStatistics({ latitude, longitude, arrivalUtc, 
                 <span className="block text-[10px] text-[#aaa]">Earth gap avg {area.average_no_earth_hours}h · worst {area.longest_no_earth_hours}h</span>
                 <span className="block text-[10px] text-[#aaa]">Least daily Earth contact avg {area.average_daily_earth_hours}h</span>
                 {parameters.max_slope_deg != null && <span className="block text-[10px] text-[#aaa]">Slope: {area.slope_known_cells} checked · {area.slope_unchecked_cells} unchecked{area.representative_slope_deg != null ? ` · inspected point ${area.representative_slope_deg}° (${area.representative_slope_resolution_m} m)` : ""}</span>}
+                <span className="block text-[10px] text-[#aaa]">Roughness P90 {area.roughness_p90_m == null ? "unknown" : `${area.roughness_p90_m} m`} ({area.roughness_known_cells}/{area.cells.length} cells) · mean DEM height {area.elevation_mean_m == null ? "unknown" : `${area.elevation_mean_m} m`}</span>
               </span>
             </div>
           ))}</div>
           <details className="text-[10px] text-[#aaa]"><summary className="cursor-pointer">How patches are ranked</summary>
-            Area coverage is the fraction of sampled cells that meet every entered limit with data available. Green patches have at least 75% coverage, yellow at least 25%, red less. Individual map cells use the limits directly; yellow is within 20% of an entered outage or contact limit. Without limits, colors use weighted visibility. When a slope limit is set, sampled cells above it are excluded from patches and cells without slope data skip that limit. Patches rank by coverage, slope data coverage, then lower-quartile weighted Sun/Earth visibility with {parameters.sun_weight}% Sun priority. These are sampled estimates, not a guarantee for every point. Visibility does not model generated power or a radio link. The 80 m DEM and {region.result.grid_spacing_m} m grid can miss small features.
+            Area coverage is the fraction of sampled cells that meet every entered limit with data available. Green patches have at least 75% coverage, yellow at least 25%, red less. Individual map cells use the limits directly; yellow is within 20% of an entered outage or contact limit. Without limits, colors use weighted visibility. Slope and roughness above entered limits exclude a cell from patches; missing terrain data skips that filter and is shown in gray. Patches rank by coverage, terrain-filter data coverage, then the lower-quartile visibility score ({parameters.sun_weight}% Sun, {100 - parameters.sun_weight}% Earth). Roughness is the RMS of 80 m DEM heights around a fitted plane in a 400 m radius; elevation is shown for context and does not change rank. These are sampled estimates, not a guarantee for every point. Visibility does not model generated power or a radio link. The 80 m DEM and {region.result.grid_spacing_m} m grid can miss small features.
           </details>
         </>}
       </section>

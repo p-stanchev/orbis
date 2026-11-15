@@ -33,6 +33,7 @@ import MissionAnalysis from "./components/MissionAnalysis";
 import SplitWorkspace from "./components/SplitWorkspace";
 import VisibilityStatistics, { type SearchRegion, type SearchGridCell } from "./components/VisibilityStatistics";
 import ExploreSearch from "./components/ExploreSearch";
+import ResilienceExplorer from "./components/ResilienceExplorer";
 
 type Site = { id: string; name: string; latitude: number; longitude: number };
 type Project = {
@@ -317,6 +318,7 @@ function MissionSettings({
 function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [workspace, setWorkspace] = useState<"map" | "explore" | "analysis" | "statistics">("map");
+  const [exploreMode, setExploreMode] = useState<"candidates" | "resilience">("candidates");
   const [browseOpen, setBrowseOpen] = useState(true);
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [hiddenProjects, setHiddenProjects] =
@@ -957,10 +959,28 @@ function App() {
               </div>
             ) :
               <div className="orbis-scroll h-full overflow-y-auto overscroll-contain bg-[#252525] p-2.5 sm:p-3">
-                <ExploreSearch area={exploreArea}
-                  onAreaChange={area => { setExploreArea(area); setRegions(null); }}
-                  onRegions={(areas, grid, spacing) => setRegions({ projectId: null, areas, grid, spacing })}
-                  onCreateProject={createFromExplore} />
+                <div className="mx-auto mb-3 max-w-[1200px] border-b border-[#444]">
+                  <h2 className="pb-2 text-sm font-medium text-white">Explore</h2>
+                  <div role="tablist" aria-label="Explore tools" className="grid w-full grid-cols-2 border-x border-t border-[#444] bg-[#292929]">
+                    <button type="button" id="explore-candidates-tab" role="tab" aria-controls="explore-candidates-panel" aria-selected={exploreMode === "candidates"}
+                      onClick={() => setExploreMode("candidates")}
+                      onKeyDown={event => { if (event.key === "ArrowRight") { setExploreMode("resilience"); document.getElementById("explore-resilience-tab")?.focus(); } }}
+                      className={`min-w-0 min-h-11 border-b-2 border-r border-r-[#444] px-2 text-[11px] sm:px-3 sm:text-xs ${exploreMode === "candidates" ? "border-b-[#03ace4] bg-[#303b40] text-white" : "border-b-transparent text-[#bbb] hover:bg-[#383838]"}`}>Candidate search</button>
+                    <button type="button" id="explore-resilience-tab" role="tab" aria-controls="explore-resilience-panel" aria-selected={exploreMode === "resilience"}
+                      onClick={() => setExploreMode("resilience")}
+                      onKeyDown={event => { if (event.key === "ArrowLeft") { setExploreMode("candidates"); document.getElementById("explore-candidates-tab")?.focus(); } }}
+                      className={`min-w-0 min-h-11 border-b-2 px-2 text-[11px] sm:px-3 sm:text-xs ${exploreMode === "resilience" ? "border-b-[#03ace4] bg-[#303b40] text-white" : "border-b-transparent text-[#bbb] hover:bg-[#383838]"}`}>Resilience explorer</button>
+                  </div>
+                </div>
+                <div id="explore-candidates-panel" role="tabpanel" aria-labelledby="explore-candidates-tab" hidden={exploreMode !== "candidates"}>
+                  <ExploreSearch area={exploreArea}
+                    onAreaChange={area => { setExploreArea(area); setRegions(null); }}
+                    onRegions={(areas, grid, spacing) => setRegions({ projectId: null, areas, grid, spacing })}
+                    onCreateProject={createFromExplore} />
+                </div>
+                <div id="explore-resilience-panel" role="tabpanel" aria-labelledby="explore-resilience-tab" hidden={exploreMode !== "resilience"}>
+                  <ResilienceExplorer projects={projects} initialProjectId={currentProject?.id} />
+                </div>
               </div>
             }
           />

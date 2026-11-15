@@ -45,6 +45,7 @@ class RegionRequest(VisibilityRequest):
     min_daily_earth_hours: float = Field(default=0, ge=0, le=24)
     min_area_km2: float = Field(default=4, ge=0.001, le=1000)
     max_slope_deg: float | None = Field(default=None, ge=0, le=90)
+    max_roughness_m: float | None = Field(default=None, ge=0, le=1000)
 
 
 def timestamp_text(value: datetime) -> str:
@@ -252,18 +253,25 @@ def compute_region(job_id: str, data: RegionRequest) -> None:
         with _jobs_lock:
             _jobs[job_id]["progress"] = 0.15
         slope_warning = None
-        if data.max_slope_deg is not None:
-            try:
-                slope_results = region_slopes(positions)
-            except (OSError, KeyError, ValueError, RuntimeError):
-                slope_results = [None] * len(positions)
-                slope_warning = "Slope data could not be read; slope screening was skipped for every cell."
-        else:
+        try:
+            slope_results = region_slopes(positions)
+        except (OSError, KeyError, ValueError, RuntimeError):
             slope_results = [None] * len(positions)
+            slope_warning = "Surface data could not be read; terrain filters were skipped for every cell."
         slope_values = np.array([item["slope_p90_deg"] if item else np.nan for item in slope_results])
+        roughness_values = np.array([item.get("roughness_rms_m") if item and item.get("roughness_rms_m") is not None else np.nan for item in slope_results])
+        elevation_values = np.array([item.get("elevation_m") if item and item.get("elevation_m") is not None else np.nan for item in slope_results])
         slope_known = np.isfinite(slope_values)
+        roughness_known = np.isfinite(roughness_values)
         too_steep = slope_known & (slope_values > data.max_slope_deg) if data.max_slope_deg is not None else \
             np.zeros(len(positions), dtype=bool)
+        too_rough = roughness_known & (roughness_values > data.max_roughness_m) if data.max_roughness_m is not None else \
+            np.zeros(len(positions), dtype=bool)
+        terrain_checked = np.ones(len(positions), dtype=bool)
+        if data.max_slope_deg is not None:
+            terrain_checked &= slope_known
+        if data.max_roughness_m is not None:
+            terrain_checked &= roughness_known
         with _jobs_lock:
             _jobs[job_id]["progress"] = 0.25
         latitudes = np.deg2rad(np.array([point[0] for point in positions]))
@@ -324,9 +332,10 @@ def compute_region(job_id: str, data: RegionRequest) -> None:
             eligible &= longest["earth"] <= data.max_no_earth_hours
         eligible &= least_daily_earth >= data.min_daily_earth_hours
         eligible &= np.all(np.isfinite(horizon), axis=1)
-        eligible &= ~too_steep
+        eligible &= ~(too_steep | too_rough)
         mission_needs = (data.max_no_sun_hours is not None or data.max_no_earth_hours is not None
-                         or data.min_daily_earth_hours > 0 or data.max_slope_deg is not None)
+                         or data.min_daily_earth_hours > 0 or data.max_slope_deg is not None
+                         or data.max_roughness_m is not None)
         if mission_needs:
             near = np.ones(len(positions), dtype=bool)
             if data.max_no_sun_hours is not None:
@@ -335,7 +344,7 @@ def compute_region(job_id: str, data: RegionRequest) -> None:
                 near &= longest["earth"] <= data.max_no_earth_hours + max(step_hours, data.max_no_earth_hours * 0.2)
             if data.min_daily_earth_hours > 0:
                 near &= least_daily_earth >= data.min_daily_earth_hours * 0.8
-            bands = np.where(eligible, "green", np.where(near & ~too_steep, "yellow", "red"))
+            bands = np.where(eligible, "green", np.where(near & ~(too_steep | too_rough), "yellow", "red"))
         else:
             bands = np.where(score >= 70, "green", np.where(score >= 35, "yellow", "red"))
         lookup = {cell: index for index, cell in enumerate(cells)}
@@ -345,11 +354,11 @@ def compute_region(job_id: str, data: RegionRequest) -> None:
         proposals = []
         for row, col in cells:
             group = [lookup.get((row + dr, col + dc)) for dr in range(side) for dc in range(side)]
-            if any(index is None or not covered[index] or too_steep[index] for index in group):
+            if any(index is None or not covered[index] or too_steep[index] or too_rough[index] for index in group):
                 continue
             quality = float(np.percentile(score[group], 25))
             meeting = float(np.mean(eligible[group])) if mission_needs else 1.0
-            known_fraction = float(np.mean(slope_known[group])) if data.max_slope_deg is not None else 1.0
+            known_fraction = float(np.mean(terrain_checked[group]))
             proposals.append((meeting, known_fraction, quality, float(np.mean(score[group])), group))
         proposals.sort(key=lambda item: (item[0], item[1], item[2], item[3]), reverse=True)
         regions = []
@@ -360,7 +369,7 @@ def compute_region(job_id: str, data: RegionRequest) -> None:
             if any(index in used for index in group):
                 continue
             used.update(group)
-            representative = max(group, key=lambda index: (eligible[index], slope_known[index], score[index]))
+            representative = max(group, key=lambda index: (eligible[index], terrain_checked[index], score[index]))
             area = len(group) * cell_area
             band = ("green" if meeting >= 0.75 else "yellow" if meeting >= 0.25 else "red") if mission_needs else \
                 ("green" if quality >= 70 else "yellow" if quality >= 35 else "red")
@@ -371,6 +380,10 @@ def compute_region(job_id: str, data: RegionRequest) -> None:
                             "slope_unchecked_cells": int(len(group) - np.count_nonzero(slope_known[group])) if data.max_slope_deg is not None else None,
                             "representative_slope_deg": float(slope_values[representative]) if slope_known[representative] else None,
                             "representative_slope_resolution_m": slope_results[representative]["resolution_m"] if slope_results[representative] else None,
+                            "roughness_known_cells": int(np.count_nonzero(roughness_known[group])),
+                            "roughness_unchecked_cells": int(len(group) - np.count_nonzero(roughness_known[group])),
+                            "roughness_p90_m": round(float(np.percentile(roughness_values[group][roughness_known[group]], 90)), 2) if np.any(roughness_known[group]) else None,
+                            "elevation_mean_m": round(float(np.mean(elevation_values[group][np.isfinite(elevation_values[group])])), 1) if np.any(np.isfinite(elevation_values[group])) else None,
                             "sun_percent": round(float(np.mean(sun[group])), 1),
                             "earth_percent": round(float(np.mean(earth[group])), 1),
                             "average_no_sun_hours": round(float(np.mean(longest["sun"][group])), 1),
@@ -395,7 +408,7 @@ def compute_region(job_id: str, data: RegionRequest) -> None:
                  "score": round(float(score[index]), 1) if np.isfinite(horizon[index]).all() else None,
                  "band": str(bands[index]),
                  "status": "no_data" if not np.isfinite(horizon[index]).all() else
-                           "slope_unchecked" if data.max_slope_deg is not None and not slope_known[index] else
+                           "slope_unchecked" if not terrain_checked[index] else
                            "below_minimum" if not eligible[index] else
                            "recommended" if (round(lat, 6), round(lon, 6)) in recommended else "evaluated"}
                 for index, (lat, lon) in enumerate(positions)]
@@ -411,10 +424,13 @@ def compute_region(job_id: str, data: RegionRequest) -> None:
                                          "slope_unchecked_cells": int(len(positions) - np.count_nonzero(slope_known)) if data.max_slope_deg is not None else None,
                                          "slope_excluded_cells": int(np.count_nonzero(too_steep)) if data.max_slope_deg is not None else None,
                                          "slope_warning": slope_warning,
+                                         "roughness_limit_m": data.max_roughness_m,
+                                         "roughness_screened_cells": int(np.count_nonzero(roughness_known)) if data.max_roughness_m is not None else None,
+                                         "roughness_unchecked_cells": int(len(positions) - np.count_nonzero(roughness_known)) if data.max_roughness_m is not None else None,
+                                         "roughness_excluded_cells": int(np.count_nonzero(too_rough)) if data.max_roughness_m is not None else None,
+                                         "surface_measured_cells": int(np.count_nonzero(roughness_known)),
                                          "color_mode": "mission_needs" if mission_needs else "relative_visibility",
-                                         "model": "Nonoverlapping sampled patches ranked by limits met, " +
-                                                  ("slope coverage, " if data.max_slope_deg is not None else "") +
-                                                  "and lower-quartile visibility; 80 m DEM horizon"})
+                                         "model": "Nonoverlapping sampled patches ranked by entered limits, terrain-filter coverage, then lower-quartile weighted visibility; 80 m DEM horizon. Roughness is RMS elevation residual after a plane fit within 400 m"})
     except Exception as exc:
         with _jobs_lock:
             _jobs[job_id].update(status="failed", error=str(exc))
@@ -426,7 +442,7 @@ def start_region(data: RegionRequest):
            round(data.radius_m, 1), timestamp_text(data.arrival_utc),
            round(data.duration_hours, 4), data.sun_weight, data.max_no_sun_hours,
            data.max_no_earth_hours, data.min_daily_earth_hours, data.min_area_km2,
-           data.max_slope_deg, "regions-v7")
+           data.max_slope_deg, data.max_roughness_m, "regions-v8")
     with _jobs_lock:
         existing = _keys.get(key)
         if not data.recalculate and existing and existing in _jobs and _jobs[existing]["status"] != "failed":
