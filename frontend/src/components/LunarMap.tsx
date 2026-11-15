@@ -486,7 +486,7 @@ export default function LunarMap({ projects, hiddenProjectIds, selected, regions
                     width: `${regions.spacing / (info.bounds.right - info.bounds.left) * 100}%`,
                     height: `${regions.spacing / (info.bounds.top - info.bounds.bottom) * 100}%`,
                     transform: "translate(-50%, -50%)",
-                    backgroundColor: cell.status === "no_data" ? "rgba(135,145,153,0.2)" : `rgba(${color},${opacity})`,
+                    backgroundColor: cell.status === "no_data" || cell.status === "slope_unchecked" ? "rgba(135,145,153,0.3)" : `rgba(${color},${opacity})`,
                     outline: cell.status === "recommended" ? `1px solid rgba(${color},0.8)` : "none" }} />;
               })}
             {probeMarker && <span className="pointer-events-none absolute z-[12] h-4 w-4 rounded-full border-2 border-white bg-[#03ace4] shadow-[0_0_0_3px_#03ace477]"

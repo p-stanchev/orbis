@@ -6,7 +6,7 @@ from threading import RLock
 import spiceypy as spice
 from fastapi import APIRouter, HTTPException, Query
 from spiceypy.utils.exceptions import SpiceyError
-from terrain import horizon_at, terrain_horizon
+from terrain import horizon_at, terrain_horizon_profile
 
 router = APIRouter(prefix="/api/ephemeris", tags=["Ephemeris"])
 
@@ -187,11 +187,11 @@ def get_ephemeris(
             ) from exc
 
     try:
-        horizon = terrain_horizon(round(latitude, 6), round(longitude, 6))
+        profile = terrain_horizon_profile(round(latitude, 6), round(longitude, 6))
     except (OSError, ValueError, KeyError) as exc:
         raise HTTPException(503, f"Terrain horizon unavailable: {exc}") from exc
     for body in (sun, earth):
-        obstruction = horizon_at(horizon, body["azimuth_deg"])
+        obstruction = horizon_at(profile["angles"], body["azimuth_deg"])
         margin = body["elevation_deg"] - obstruction
         angular_radius = body["angular_radius_deg"]
         ratio = max(-1.0, min(1.0, margin / angular_radius))
@@ -207,6 +207,9 @@ def get_ephemeris(
         "sun": sun,
         "earth": earth,
         "terrain_horizon_applied": True,
+        "terrain_coverage_min_km": profile["far_coverage_min_km"],
+        "near_5m_used": profile["near_5m_used"],
         "reference_frame": "MOON_ME",
-        "model": "80 m DEM horizon; terrain sampling up to 100 km",
+        "model": ("5 m DEM within 2 km where covered; " if profile["near_5m_used"] else "") +
+                 "80 m DEM sampled to 100 km where covered",
     }

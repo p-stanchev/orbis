@@ -43,6 +43,11 @@ class NameRequest(BaseModel):
         return value
 
 
+class SiteCreate(NameRequest):
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
+
+
 class ProjectUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=100)
     arrival_utc: datetime | None = None
@@ -251,8 +256,14 @@ async def delete_project(project_id: str):
 
 
 @app.post("/api/projects/{project_id}/sites", status_code=201)
-async def create_site(project_id: str, data: NameRequest):
+async def create_site(project_id: str, data: SiteCreate):
     project = get_project(project_id)
+    if (data.latitude is None) != (data.longitude is None):
+        raise HTTPException(422, "Provide both site coordinates")
+    latitude = data.latitude if data.latitude is not None else project["center_latitude"]
+    longitude = data.longitude if data.longitude is not None else project["center_longitude"]
+    if distance_m(project["center_latitude"], project["center_longitude"], latitude, longitude) > project["radius_m"] + 0.5:
+        raise HTTPException(422, "Landing site must stay inside the project search radius")
     site_id = str(uuid4())
     try:
         with get_connection() as connection:
@@ -262,7 +273,7 @@ async def create_site(project_id: str, data: NameRequest):
                     (id, project_id, name, latitude, longitude)
                 VALUES (?, ?, ?, ?, ?)
                 """,
-                (site_id, project_id, data.name, project["center_latitude"], project["center_longitude"]),
+                (site_id, project_id, data.name, latitude, longitude),
             )
     except sqlite3.IntegrityError:
         raise HTTPException(409, "Landing site name already exists")

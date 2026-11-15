@@ -3,7 +3,10 @@ import type { SearchGridCell, SearchRegion } from "./VisibilityStatistics";
 
 type Area = { latitude: number; longitude: number; radius_m: number };
 type Result = { regions: SearchRegion[]; grid: SearchGridCell[]; grid_spacing_m: number;
-  evaluated_cells: number; outside_coverage_cells: number; color_mode: string };
+  evaluated_cells: number; outside_coverage_cells: number; color_mode: string;
+  slope_limit_deg?: number | null; slope_screened_cells?: number | null;
+  slope_5m_cells?: number | null; slope_80m_cells?: number | null;
+  slope_unchecked_cells?: number | null; slope_excluded_cells?: number | null; slope_warning?: string | null };
 type Job = { status: "running" | "completed" | "failed"; progress: number; result: Result | null; error: string | null };
 type Props = { area: Area; onAreaChange: (area: Area) => void;
   onRegions: (areas: SearchRegion[], grid: SearchGridCell[], spacing: number) => void;
@@ -20,6 +23,7 @@ export default function ExploreSearch({ area, onAreaChange, onRegions, onCreateP
   const [earthLimit, setEarthLimit] = useState("");
   const [dailyEarth, setDailyEarth] = useState("");
   const [minArea, setMinArea] = useState("");
+  const [slopeLimit, setSlopeLimit] = useState("");
   const [name, setName] = useState("");
   const [result, setResult] = useState<Result | null>(null);
   const [suggestions, setSuggestions] = useState<{ arrival: string; meeting: number | null; score: number }[]>([]);
@@ -41,7 +45,7 @@ export default function ExploreSearch({ area, onAreaChange, onRegions, onCreateP
     setSuggestions([]);
     currentSearch.current = null;
     onRegions([], [], 0);
-  }, [arrival, duration, sunLimit, earthLimit, dailyEarth, minArea]);
+  }, [arrival, duration, sunLimit, earthLimit, dailyEarth, minArea, slopeLimit]);
   useEffect(() => {
     if (requestedArea.current?.latitude === area.latitude &&
       requestedArea.current?.longitude === area.longitude &&
@@ -115,6 +119,7 @@ export default function ExploreSearch({ area, onAreaChange, onRegions, onCreateP
     const daily = dailyEarth.trim() === "" ? 0 : Number(dailyEarth);
     const sun = Number(sunLimit);
     const earth = Number(earthLimit);
+    const slope = slopeLimit.trim() === "" ? null : Number(slopeLimit);
     if (!Number.isFinite(date.getTime()) || !Number.isInteger(hours) || hours < 1 || hours > 8760 ||
       !center.latitude.trim() || !center.longitude.trim() || !center.radius.trim() ||
       !Number.isFinite(searchArea.latitude) || searchArea.latitude < -90 || searchArea.latitude > -80 ||
@@ -124,7 +129,8 @@ export default function ExploreSearch({ area, onAreaChange, onRegions, onCreateP
       !Number.isFinite(minimum) || minimum < .001 || minimum > Math.min(1000, circleArea) ||
       !Number.isFinite(daily) || daily < 0 || daily > 24 ||
       !Number.isFinite(sun) || sun < 0 || sun > 8760 ||
-      !Number.isFinite(earth) || earth < 0 || earth > 8760) {
+      !Number.isFinite(earth) || earth < 0 || earth > 8760 ||
+      (slope !== null && (!Number.isFinite(slope) || slope < 0 || slope > 90))) {
       setError("Enter the region, UTC timing, and both outage limits. Check any optional filters you entered.");
       return;
     }
@@ -133,7 +139,8 @@ export default function ExploreSearch({ area, onAreaChange, onRegions, onCreateP
     controller.current = next;
     const body = { ...searchArea,
       arrival_utc: date.toISOString(), duration_hours: hours, max_no_sun_hours: sun,
-      max_no_earth_hours: earth, min_daily_earth_hours: daily, min_area_km2: minimum, sun_weight: 50 };
+      max_no_earth_hours: earth, min_daily_earth_hours: daily, min_area_km2: minimum,
+      max_slope_deg: slope, sun_weight: 50 };
     setError("");
     setRunning(true);
     setResult(null);
@@ -226,7 +233,7 @@ export default function ExploreSearch({ area, onAreaChange, onRegions, onCreateP
     </section>
     <section className="orbis-panel space-y-3 p-3">
       <h3 className="font-medium text-white">Filters</h3>
-      <p className="text-[#aaa]">Set both outage limits. Add contact and area requirements if needed.</p>
+      <p className="text-[#aaa]">Set both outage limits. Add contact, area, or slope requirements if needed.</p>
       <div className="grid grid-cols-1 gap-4 min-[440px]:grid-cols-2">
         <label className={label}>Longest darkness <span className="text-[#999]">· h</span>
           <input className={input} type="number" min={0} max={8760} step="any" required placeholder="Hours" value={sunLimit} onChange={event => setSunLimit(event.target.value)} /></label>
@@ -236,6 +243,8 @@ export default function ExploreSearch({ area, onAreaChange, onRegions, onCreateP
           <input className={input} type="number" min={0} max={24} step="0.5" placeholder="No minimum" value={dailyEarth} onChange={event => setDailyEarth(event.target.value)} /></label>
         <label className={label}>Minimum candidate area <span className="text-[#999]">· km², optional</span>
           <input className={input} type="number" min={0.001} max={1000} step="any" placeholder="Auto" value={minArea} onChange={event => setMinArea(event.target.value)} /></label>
+        <label className={label}>Maximum local slope <span className="text-[#999]">· °, optional</span>
+          <input className={input} type="number" min={0} max={90} step="any" placeholder="No slope filter" value={slopeLimit} onChange={event => setSlopeLimit(event.target.value)} /></label>
       </div>
     </section>
     <button type="button" disabled={running} onClick={() => void search()}
@@ -244,9 +253,10 @@ export default function ExploreSearch({ area, onAreaChange, onRegions, onCreateP
     {result && <section className="space-y-2 border-t border-[#444] pt-3">
       <div className="flex flex-wrap items-end justify-between gap-2"><h3 className="font-medium text-white">Candidate areas</h3>
         <span className="text-[11px] text-[#aeb6ba]">{result.evaluated_cells} sampled cells · {result.grid_spacing_m} m grid</span></div>
-      <p className="text-[11px] text-[#aeb6ba]">{result.color_mode === "mission_needs" ? "Green meets entered limits; yellow is close; red misses them." : "Green ≥70%, yellow ≥35%, red <35% by weighted visibility."} Gray has no DEM. Colors describe visibility, not landing safety.</p>
+      <p className="text-[11px] text-[#aeb6ba]">{result.color_mode === "mission_needs" ? "Green meets entered limits; yellow is close; red misses them." : "Green ≥70%, yellow ≥35%, red <35% by weighted visibility."} Gray marks missing DEM or unchecked slope. Colors are screening estimates, not landing safety.</p>
       {result.outside_coverage_cells > 0 && <p className="text-[11px] text-[#aeb6ba]">{result.outside_coverage_cells} cells outside map coverage.</p>}
-      {!result.regions.length && <p className="text-[#aeb6ba]">No complete sampled patch of this size was found. Reduce the patch size or move the region.</p>}
+      {result.slope_limit_deg != null && <p className="text-[11px] text-[#aeb6ba]">Slope ≤{result.slope_limit_deg}°: {result.slope_screened_cells} screened ({result.slope_5m_cells} at 5 m, {result.slope_80m_cells} at 80 m), {result.slope_excluded_cells} too steep, {result.slope_unchecked_cells} unchecked. Missing slope data skips this filter for those cells. {result.slope_warning}</p>}
+      {!result.regions.length && <p className="text-[#aeb6ba]">No sampled patch of this size passes the available filters. Reduce the patch size or review the limits.</p>}
       {result.regions.length > 0 && <label className="block text-[#b6bdc0]">Project name
         <input className={input} maxLength={100} value={name} placeholder="Name a saved candidate" onChange={event => setName(event.target.value)} /></label>}
       {result.regions.map((candidate, index) => <div key={`${candidate.center_latitude}-${candidate.center_longitude}`}
@@ -255,6 +265,7 @@ export default function ExploreSearch({ area, onAreaChange, onRegions, onCreateP
           <span className="font-mono text-[#d5dbde]">{candidate.meeting_percent === null ? `${candidate.robust_score}% rank` : `${candidate.meeting_percent}% meets needs`}</span></div>
         <p className="mt-1 text-[#aeb6ba]">{candidate.center_latitude.toFixed(4)}°, {candidate.center_longitude.toFixed(4)}° · Sun {candidate.sun_percent}% · Earth {candidate.earth_percent}%</p>
         <p className="text-[#aeb6ba]">Dark gap avg {candidate.average_no_sun_hours}h, worst {candidate.longest_no_sun_hours}h · Earth gap avg {candidate.average_no_earth_hours}h, worst {candidate.longest_no_earth_hours}h</p>
+        {result.slope_limit_deg != null && <p className="text-[#aeb6ba]">Slope: {candidate.slope_known_cells} checked · {candidate.slope_unchecked_cells} unchecked{candidate.representative_slope_deg != null ? ` · inspected point ${candidate.representative_slope_deg}° (${candidate.representative_slope_resolution_m} m)` : ""}</p>}
         <button type="button" disabled={saving} onClick={() => void save(candidate)}
           className="mt-2 min-h-9 border border-[#666] px-2.5 text-white hover:bg-[#444] disabled:opacity-50">Create project + candidate site</button>
       </div>)}
@@ -272,7 +283,7 @@ export default function ExploreSearch({ area, onAreaChange, onRegions, onCreateP
         <p className="text-[10px] text-[#9ba4a9]">Selecting a date fills the form. Search again to inspect its full map.</p>
       </div>}
       <details className="text-[10px] text-[#9ba4a9]"><summary className="cursor-pointer">Model limits</summary>
-        This is a regional screen using the 80 m DEM horizon. A patch is a sample, not a verified landing zone. Visibility does not establish solar power, radio connectivity or safe terrain. Date comparisons evaluate only the three dates shown.
+        This is a regional screen using the 80 m DEM horizon. Where slope is available, the filter uses the 5 m slope map south of 87°S and a coarser 80 m elevation-derived slope farther north. Missing slope data skips the filter and is reported. A patch is a sample, not a verified landing zone. Visibility does not establish solar power, radio connectivity or safe terrain. Date comparisons evaluate only the three dates shown.
       </details>
     </section>}
   </div>;

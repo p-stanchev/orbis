@@ -133,7 +133,7 @@ export default function MissionAnalysis({ latitude, longitude, arrivalUtc, durat
         </div>
         {error && <div role="alert" className="break-words text-[#ef9292]">{error}</div>}
         <details className="text-[10px] leading-relaxed text-[#aaa]"><summary className="cursor-pointer">Model details</summary>
-          Sun/Earth visibility uses the 80 m DEM horizon up to 100 km. The 3D patch is local with 2x vertical relief; lighting and nearby shadows are illustrative. Power systems and ground stations are not modeled.
+          Sun/Earth visibility uses sampled terrain horizons{result?.near_5m_used ? ", with 5 m DEM near the site" : ""} and the 80 m DEM farther out. {result?.terrain_coverage_min_km !== undefined ? `Far terrain is covered to at least ${result.terrain_coverage_min_km} km in every sampled direction. ` : ""}The 3D patch has 2x vertical relief; lighting and nearby shadows are illustrative. Power systems and ground stations are not modeled.
         </details>
       </div>
     </div>

@@ -19,6 +19,8 @@ export type Ephemeris = {
   sun: CelestialBody;
   earth: CelestialBody;
   terrain_horizon_applied: boolean;
+  terrain_coverage_min_km?: number;
+  near_5m_used?: boolean;
 };
 
 export type TerrainPatch = {
@@ -464,7 +466,7 @@ export default function TerrainScene({
           onClick={() => container.current?.dispatchEvent(new Event("orbis-reset-view"))}>Reset view</button>
       </div>
       {ephemeris && <span className="pointer-events-none absolute right-2 top-10 z-10 bg-[#171b20]/90 px-2 py-1 text-[10px] text-[#d0d0d0]">
-        Sun {ephemeris.sun.terrain_visibility === "hidden" ? "behind terrain" : `${ephemeris.sun.elevation_deg.toFixed(1)}° above local level`}
+        Sun {ephemeris.sun.terrain_visibility === "hidden" ? ephemeris.sun.geometric_visibility === "hidden" ? "below geometric horizon" : "blocked by terrain" : `${ephemeris.sun.elevation_deg.toFixed(1)}° above local level`}
       </span>}
       {!patch && (
         <div className="pointer-events-none absolute left-2 top-2 z-10 max-w-[70%] bg-[#292929] px-2 py-1 text-[11px] text-[#ddd]">

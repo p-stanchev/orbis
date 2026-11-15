@@ -1,6 +1,7 @@
 import io
 import math
 import json
+from contextlib import ExitStack
 from functools import lru_cache
 from pathlib import Path
 
@@ -11,7 +12,7 @@ from PIL import Image
 from pydantic import BaseModel, Field
 from pyproj import Transformer
 from rasterio.enums import Resampling
-from rasterio.windows import from_bounds
+from rasterio.windows import Window, from_bounds
 from rasterio.warp import reproject
 
 router = APIRouter(prefix="/api/terrain", tags=["Terrain"])
@@ -31,35 +32,131 @@ def elevation_dataset():
     return rasterio.open(dataset_path("elevation"))
 
 
-@lru_cache(maxsize=128)
-def terrain_horizon(latitude: float, longitude: float):
-    azimuths = np.arange(0.0, 360.0, 2.0)
-    distances = np.geomspace(80.0, 100000.0, 120)
+def sample_slope(src, forward, latitude: float, longitude: float, high_resolution: bool):
+    x, y = forward.transform(longitude, latitude)
+    row, col = src.index(x, y)
+    radius = 50 if high_resolution else 400
+    pixels = max(1, int(round(radius / max(abs(src.res[0]), abs(src.res[1])))))
+    edge = pixels if high_resolution else pixels + 1
+    width = 2 * edge + 1
+    values = src.read(1, window=Window(col - edge, row - edge, width, width),
+                      boundless=True, masked=True)
+    offsets = np.arange(-edge, edge + 1)
+    footprint = (offsets[:, None] * abs(src.res[1])) ** 2 + \
+                (offsets[None, :] * abs(src.res[0])) ** 2 <= radius ** 2
+    raw_valid = ~np.ma.getmaskarray(values) & np.isfinite(values.data)
+    if high_resolution:
+        slopes = values.data
+        valid = footprint & raw_valid & (slopes >= 0) & (slopes <= 90)
+    else:
+        neighbors = np.zeros_like(raw_valid)
+        neighbors[1:-1, 1:-1] = (raw_valid[1:-1, 1:-1] & raw_valid[:-2, 1:-1] &
+                                raw_valid[2:, 1:-1] & raw_valid[1:-1, :-2] & raw_valid[1:-1, 2:])
+        north_gradient, east_gradient = np.gradient(values.data, abs(src.res[1]), abs(src.res[0]))
+        slopes = np.rad2deg(np.arctan(np.hypot(north_gradient, east_gradient)))
+        valid = footprint & neighbors & np.isfinite(slopes)
+    if np.count_nonzero(valid) / np.count_nonzero(footprint) < 0.75:
+        return None
+    return {"slope_p90_deg": round(float(np.percentile(slopes[valid], 90)), 1),
+            "footprint_radius_m": radius, "resolution_m": 5 if high_resolution else 80,
+            "dataset": "LOLA 5 m slope raster" if high_resolution else "LOLA 80 m elevation-derived slope"}
+
+
+def region_slopes(locations: list[tuple[float, float]]):
+    config = json.loads((DATA / "datasets.json").read_text(encoding="utf-8"))
+    filename = config.get("high_resolution", {}).get("slope")
+    path = DATA / "source" / filename if filename else None
+    with ExitStack() as stack:
+        elevation = stack.enter_context(elevation_dataset())
+        elevation_forward = Transformer.from_crs(elevation.crs.geodetic_crs, elevation.crs, always_xy=True)
+        high = stack.enter_context(rasterio.open(path)) if path is not None and path.is_file() else None
+        high_forward = Transformer.from_crs(high.crs.geodetic_crs, high.crs, always_xy=True) if high else None
+        results = []
+        for latitude, longitude in locations:
+            found = sample_slope(high, high_forward, latitude, longitude, True) if high and latitude <= -87 else None
+            results.append(found or sample_slope(elevation, elevation_forward, latitude, longitude, False))
+        return results
+
+
+def local_slope(latitude: float, longitude: float):
+    return region_slopes([(latitude, longitude)])[0]
+
+
+@router.get("/slope")
+def slope_at(latitude: float = Query(ge=-90, le=-80), longitude: float = Query(ge=-180, le=180)):
+    try:
+        slope = local_slope(latitude, longitude)
+    except (OSError, KeyError, ValueError) as exc:
+        raise HTTPException(503, str(exc)) from exc
+    return slope or {"slope_p90_deg": None, "footprint_radius_m": None,
+                     "resolution_m": None, "dataset": None}
+
+
+def horizon_samples(src, latitude: float, longitude: float, azimuths: np.ndarray,
+                    distances: np.ndarray):
     angles = np.deg2rad(azimuths)[:, None]
     arc = distances[None, :] / 1737400.0
     lat = math.radians(latitude)
     lon = math.radians(longitude)
-    destination_lat = np.arcsin(np.sin(lat) * np.cos(arc) + np.cos(lat) * np.sin(arc) * np.cos(angles))
-    destination_lon = lon + np.arctan2(
-        np.sin(angles) * np.sin(arc) * np.cos(lat),
-        np.cos(arc) - np.sin(lat) * np.sin(destination_lat),
-    )
+    cos_arc = np.cos(arc)
+    north_arc = np.sin(arc) * np.cos(angles)
+    east_arc = np.sin(arc) * np.sin(angles)
+    x_direction = np.cos(lat) * np.cos(lon) * cos_arc - np.sin(lat) * np.cos(lon) * north_arc - np.sin(lon) * east_arc
+    y_direction = np.cos(lat) * np.sin(lon) * cos_arc - np.sin(lat) * np.sin(lon) * north_arc + np.cos(lon) * east_arc
+    z_direction = np.sin(lat) * cos_arc + np.cos(lat) * north_arc
+    destination_lat = np.arcsin(np.clip(z_direction, -1, 1))
+    destination_lon = np.arctan2(y_direction, x_direction)
+    forward = Transformer.from_crs(src.crs.geodetic_crs, src.crs, always_xy=True)
+    x0, y0 = forward.transform(longitude, latitude)
+    x, y = forward.transform(np.rad2deg(destination_lon).ravel(), np.rad2deg(destination_lat).ravel())
+    origin = next(src.sample([(x0, y0)], masked=True))[0]
+    if np.ma.is_masked(origin) or not np.isfinite(origin) or abs(float(origin)) >= 100000:
+        raise ValueError("No elevation data at landing site")
+    values = np.ma.asarray(list(src.sample(zip(x, y), masked=True)))[:, 0].reshape(len(azimuths), len(distances))
+    valid = ~np.ma.getmaskarray(values) & np.isfinite(values.data)
+    valid &= np.abs(values.data) < 100000
+    curvature = distances ** 2 / (2 * 1737400.0)
+    slopes = np.arctan2(values.data - float(origin) - curvature[None, :], distances[None, :])
+    horizon = np.max(np.where(valid, slopes, -np.inf), axis=1)
+    return np.rad2deg(horizon), valid
+
+
+@lru_cache(maxsize=128)
+def terrain_horizon_profile(latitude: float, longitude: float):
+    azimuths = np.arange(0.0, 360.0, 2.0)
+    far_distances = np.geomspace(80.0, 100000.0, 120)
     with elevation_dataset() as src:
-        forward = Transformer.from_crs(src.crs.geodetic_crs, src.crs, always_xy=True)
-        x0, y0 = forward.transform(longitude, latitude)
-        x, y = forward.transform(np.rad2deg(destination_lon).ravel(), np.rad2deg(destination_lat).ravel())
-        origin = next(src.sample([(x0, y0)], masked=True))[0]
-        if np.ma.is_masked(origin) or not np.isfinite(origin):
-            raise ValueError("No elevation data at landing site")
-        values = np.ma.asarray(list(src.sample(zip(x, y), masked=True)))[:, 0].reshape(len(azimuths), len(distances))
-        valid = ~np.ma.getmaskarray(values) & np.isfinite(values.data)
-        valid &= np.abs(values.data) < 100000
-        if not np.all(np.any(valid, axis=1)):
-            raise ValueError("DEM does not cover the full local horizon")
-        curvature = distances ** 2 / (2 * 1737400.0)
-        slopes = np.arctan2(values.data - float(origin) - curvature[None, :], distances[None, :])
-        horizon = np.max(np.where(valid, slopes, -np.inf), axis=1)
-        return tuple(float(value) for value in np.rad2deg(horizon))
+        far_horizon, far_valid = horizon_samples(src, latitude, longitude, azimuths, far_distances)
+
+    near_used = False
+    if latitude <= -87:
+        config = json.loads((DATA / "datasets.json").read_text(encoding="utf-8"))
+        filename = config.get("high_resolution", {}).get("elevation")
+        path = DATA / "source" / filename if filename else None
+        if path is not None and path.is_file():
+            near_distances = np.concatenate((np.arange(5.0, 255.0, 5.0),
+                                             np.arange(260.0, 2010.0, 20.0)))
+            with rasterio.open(path) as src:
+                try:
+                    near_horizon, near_valid = horizon_samples(src, latitude, longitude,
+                                                               azimuths, near_distances)
+                except ValueError:
+                    near_valid = None
+            if near_valid is not None and np.any(near_valid):
+                far_horizon = np.maximum(far_horizon, near_horizon)
+                near_used = True
+
+    if not np.all(np.isfinite(far_horizon)):
+        raise ValueError("DEM does not cover every horizon direction")
+    farthest = np.max(np.where(far_valid, far_distances[None, :], 0), axis=1)
+    return {"angles": tuple(float(value) for value in far_horizon),
+            "near_5m_used": near_used,
+            "far_coverage_min_km": round(float(np.min(farthest) / 1000), 1),
+            "azimuth_step_deg": 2.0}
+
+
+def terrain_horizon(latitude: float, longitude: float):
+    return terrain_horizon_profile(latitude, longitude)["angles"]
 
 
 def horizon_at(horizon: tuple[float, ...], azimuth: float) -> float:

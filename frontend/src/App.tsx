@@ -943,6 +943,13 @@ function App() {
                   arrivalUtc={currentProject.arrival_utc} durationHours={currentProject.duration_hours}
                   project={currentProject} probePoint={probePoint}
                   onSelectSite={siteId => { setSelected({ projectId: currentProject.id, siteId }); setProbePoint(null); }}
+                  onSaveCandidate={async (candidateName, point) => {
+                    const site = await request<Site>(`/api/projects/${currentProject.id}/sites`, "POST",
+                      { name: candidateName, latitude: point.latitude, longitude: point.longitude });
+                    setSelected({ projectId: currentProject.id, siteId: site.id });
+                    setProbePoint(null);
+                    void reload().catch(() => {});
+                  }}
                   onProbePoint={point => { setProbePoint(point); setProbeMode(false); }}
                   onProbeMode={enabled => { setWorkspace("map"); setProbeMode(enabled); }}
                   onSaveMission={changes => saveMissionSettings(currentProject.id, changes)}

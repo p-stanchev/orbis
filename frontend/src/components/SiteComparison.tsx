@@ -112,7 +112,7 @@ export default function SiteComparison({ sites, arrivalUtc, durationHours, onSel
               </div>}
           </div>)}
         </div>}
-        {rows.length > 0 && <p className="text-[10px] text-[#aaa]">Estimates use the existing 80 m DEM terrain horizon model. Earth visibility is potential line of sight, not an operational communications link.</p>}
+        {rows.length > 0 && <p className="text-[10px] text-[#aaa]">Estimates use sampled terrain horizons, including the 5 m DEM near sites where available and the 80 m DEM farther out. Any visible part of the disk counts. Earth visibility is potential line of sight, not an operational communications link.</p>}
       </div>
     </details>
   );
