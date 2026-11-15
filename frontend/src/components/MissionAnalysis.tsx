@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Globe2, Sun, Play, Pause } from "lucide-react";
-import TerrainScene, { type Ephemeris, type TerrainPatch } from "./TerrainScene";
+import TerrainScene, { type CelestialBody, type Ephemeris, type TerrainPatch } from "./TerrainScene";
 
 type Props = {
   latitude: number;
@@ -13,6 +13,12 @@ type Props = {
 const fmt = (date: Date) => Number.isFinite(date.getTime())
   ? date.toISOString().slice(0, 16).replace("T", " ") + " UTC"
   : "Invalid arrival time";
+
+const bodyStatus = (body: CelestialBody) => {
+  if (body.terrain_visibility === "hidden") return body.geometric_visibility === "hidden" ? "Below geometric horizon" : "Blocked by terrain";
+  if (body.terrain_visibility === "partial") return "Partly visible above terrain";
+  return "Above terrain horizon";
+};
 
 export default function MissionAnalysis({ latitude, longitude, arrivalUtc, durationHours, siteName }: Props) {
   const [elapsed, setElapsed] = useState(0);
@@ -114,8 +120,7 @@ export default function MissionAnalysis({ latitude, longitude, arrivalUtc, durat
                 {body === "sun" ? <Sun size={13} /> : <Globe2 size={13} />} {body === "sun" ? "Sun" : "Earth"}
               </div>
               {result ? <>
-                <div className="text-[#eee]">{result[body].terrain_visibility === "partial" ? "Partly visible" :
-                  result[body].terrain_visibility === "hidden" ? "Below terrain" : "Visible"}</div>
+                <div className="text-[#eee]">{bodyStatus(result[body])}</div>
                 <div className="text-[#aaa]">Elevation {result[body].elevation_deg.toFixed(2)}° · azimuth {result[body].azimuth_deg.toFixed(1)}°</div>
                 <div className="text-[#aaa]">Local horizon {result[body].terrain_horizon_deg?.toFixed(2)}°</div>
               </> : <div className="text-[#999]">{loading ? "Calculating..." : "Unavailable"}</div>}
@@ -124,7 +129,7 @@ export default function MissionAnalysis({ latitude, longitude, arrivalUtc, durat
         </div>
         {error && <div role="alert" className="break-words text-[#ef9292]">{error}</div>}
         <details className="text-[10px] leading-relaxed text-[#aaa]"><summary className="cursor-pointer">Model details</summary>
-          Sun/Earth visibility uses the 80 m DEM horizon up to 100 km. The 3D patch is local with relief ×3; lighting and nearby shadows are illustrative. Power systems and ground stations are not modeled.
+          Sun/Earth visibility uses the 80 m DEM horizon up to 100 km. The 3D patch is local with 2x vertical relief; lighting and nearby shadows are illustrative. Power systems and ground stations are not modeled.
         </details>
       </div>
     </div>

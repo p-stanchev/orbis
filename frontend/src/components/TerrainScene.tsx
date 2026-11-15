@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
@@ -74,14 +74,15 @@ function buildCircularTerrain(patch: TerrainPatch) {
   const valid = data.filter((value): value is number => value !== null && Number.isFinite(value));
   if (!valid.length) return null;
   const ordered = [...valid].sort((a, b) => a - b);
-  const median = ordered[Math.floor(ordered.length / 2)];
   const centerIndex = Math.floor(n / 2) * n + Math.floor(n / 2);
-  const centerElevation = data[centerIndex] ?? median;
-  const radius = 6;
+  const centerValue = data[centerIndex];
+  if (centerValue === null || !Number.isFinite(centerValue)) return null;
+  const centerElevation = centerValue;
+  const radius = 10;
   const segments = 128;
   const rings = 45;
   const metersToScene = radius * 2 / Math.max(patch.width_m, 1);
-  const exaggeration = 3;
+  const exaggeration = 2;
   const lunarRadiusM = 1_737_400;
 
   function sample(x: number, z: number) {
@@ -103,7 +104,7 @@ function buildCircularTerrain(patch: TerrainPatch) {
         total += weights[i];
       }
     }
-    return total > 0 ? sum / total : median;
+    return total > 0 ? sum / total : null;
   }
 
   const positions: number[] = [];
@@ -115,8 +116,15 @@ function buildCircularTerrain(patch: TerrainPatch) {
   const light = new THREE.Color("#b2b9bc");
   const shaded = new THREE.Color();
 
+  const validVertices: boolean[] = [];
   function addVertex(x: number, z: number) {
     const elevation = sample(x, z);
+    if (elevation === null) {
+      positions.push(x, 0, z);
+      colors.push(0, 0, 0);
+      validVertices.push(false);
+      return;
+    }
     const distanceMeters = Math.hypot(x, z) / metersToScene;
     const arc = distanceMeters / lunarRadiusM;
     const sphereSagMeters = (lunarRadiusM + centerElevation) * (Math.cos(arc) - 1);
@@ -126,6 +134,7 @@ function buildCircularTerrain(patch: TerrainPatch) {
     const t = THREE.MathUtils.clamp((elevation - low) / Math.max(high - low, 1), 0, 1);
     shaded.copy(dark).lerp(light, t);
     colors.push(shaded.r, shaded.g, shaded.b);
+    validVertices.push(true);
   }
 
   addVertex(0, 0);
@@ -138,15 +147,21 @@ function buildCircularTerrain(patch: TerrainPatch) {
   }
 
   for (let segment = 0; segment < segments; segment++) {
-    indices.push(0, 1 + (segment + 1) % segments, 1 + segment);
+    const a = 1 + (segment + 1) % segments;
+    const b = 1 + segment;
+    if (validVertices[a] && validVertices[b]) indices.push(0, a, b);
   }
   for (let ring = 1; ring < rings; ring++) {
     const inner = 1 + (ring - 1) * segments;
     const outer = inner + segments;
     for (let segment = 0; segment < segments; segment++) {
       const next = (segment + 1) % segments;
-      indices.push(inner + segment, inner + next, outer + segment);
-      indices.push(inner + next, outer + next, outer + segment);
+      const a = inner + segment;
+      const b = inner + next;
+      const c = outer + segment;
+      const d = outer + next;
+      if (validVertices[a] && validVertices[b] && validVertices[c]) indices.push(a, b, c);
+      if (validVertices[b] && validVertices[d] && validVertices[c]) indices.push(b, d, c);
     }
   }
 
@@ -168,6 +183,7 @@ export default function TerrainScene({
   siteLabel: string;
 }) {
   const container = useRef<HTMLDivElement>(null);
+  const [viewMode, setViewMode] = useState<"inspection" | "surface">("inspection");
   const objects = useRef<{
     sun: THREE.Mesh;
     earth: THREE.Mesh;
@@ -182,7 +198,7 @@ export default function TerrainScene({
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color("#10151b");
-    const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 500);
+    const camera = new THREE.PerspectiveCamera(52, 1, 0.05, 500);
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -203,16 +219,17 @@ export default function TerrainScene({
     controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
     controls.mouseButtons.MIDDLE = THREE.MOUSE.DOLLY;
     controls.mouseButtons.RIGHT = THREE.MOUSE.PAN;
-    controls.minDistance = 8;
-    controls.maxDistance = 75;
+    controls.minDistance = viewMode === "surface" ? 0.7 : 4;
+    controls.maxDistance = 45;
     controls.minPolarAngle = 0.08;
-    controls.maxPolarAngle = Math.PI * 0.42;
+    controls.maxPolarAngle = Math.PI / 2 - 0.025;
     controls.zoomSpeed = 0.85;
     controls.panSpeed = 0.9;
 
-    let cameraFloor = 1.5;
-    const initialTarget = new THREE.Vector3(0, 0, 0);
-    const initialOffset = new THREE.Vector3(0, 12, 19);
+    let surface: THREE.Mesh | null = null;
+    let inspectionFloor = 0.4;
+    const initialTarget = viewMode === "surface" ? new THREE.Vector3(0, 0.8, -5) : new THREE.Vector3(0, 0, 0);
+    const initialOffset = viewMode === "surface" ? new THREE.Vector3(0, 0.45, 5) : new THREE.Vector3(7, 8, 13);
     const reset = () => {
       controls.target.copy(initialTarget);
       camera.position.copy(initialTarget).add(initialOffset);
@@ -223,8 +240,13 @@ export default function TerrainScene({
       const direction = (event as CustomEvent<{ azimuth: number }>).detail;
       if (!direction) return;
       const az = THREE.MathUtils.degToRad(direction.azimuth);
-      controls.target.set(0, 0, 0);
-      camera.position.set(-Math.sin(az) * 21, Math.max(cameraFloor + 2, 7), Math.cos(az) * 21);
+      if (viewMode === "surface") {
+        controls.target.set(Math.sin(az) * 5, 0.8, -Math.cos(az) * 5);
+        camera.position.set(0, 1.25, 0);
+      } else {
+        controls.target.set(0, 0, 0);
+        camera.position.set(-Math.sin(az) * 13, 8, Math.cos(az) * 13);
+      }
       controls.update();
     };
 
@@ -250,15 +272,15 @@ export default function TerrainScene({
     if (patch) {
       const geometry = buildCircularTerrain(patch);
       if (geometry) {
-        geometry.computeBoundingBox();
-        cameraFloor = Math.max(1.5, (geometry.boundingBox?.max.y ?? 0) + 0.8);
         const material = new THREE.MeshStandardMaterial({
           vertexColors: true,
           roughness: 1,
           metalness: 0,
-          side: THREE.FrontSide,
+          side: THREE.DoubleSide,
         });
-        const surface = new THREE.Mesh(geometry, material);
+        geometry.computeBoundingBox();
+        inspectionFloor = Math.max(0.4, (geometry.boundingBox?.max.y ?? 0) + 0.5);
+        surface = new THREE.Mesh(geometry, material);
         surface.rotation.y = THREE.MathUtils.degToRad(patch.north_rotation_deg ?? 0);
         surface.receiveShadow = true;
         surface.castShadow = true;
@@ -267,17 +289,16 @@ export default function TerrainScene({
         materials.push(material);
 
         const pinGeometry = new THREE.SphereGeometry(0.15, 20, 16);
-        const pinMaterial = new THREE.MeshBasicMaterial({ color: "#ff9900", depthTest: false });
+        const pinMaterial = new THREE.MeshBasicMaterial({ color: "#ff9900" });
         const pin = new THREE.Mesh(pinGeometry, pinMaterial);
-        pin.position.set(0, 0.25, 0);
-        pin.renderOrder = 10;
+        pin.position.set(0, 0.17, 0);
         scene.add(pin);
         geometries.push(pinGeometry);
         materials.push(pinMaterial);
 
         const label = textSprite(siteLabel.toUpperCase().slice(0, 24), "#ffffff", 0.32);
         label.sprite.position.set(0, 0.95, 0);
-        label.sprite.renderOrder = 10;
+        label.material.depthTest = true;
         scene.add(label.sprite);
         materials.push(label.material);
         textures.push(label.texture);
@@ -329,22 +350,39 @@ export default function TerrainScene({
       sun, earth, sunLabel: sunLabel.sprite, earthLabel: earthLabel.sprite, sunlight,
     };
 
+    const raycaster = new THREE.Raycaster();
+    const groundAt = (x: number, z: number) => {
+      if (!surface) return 0;
+      raycaster.set(new THREE.Vector3(x, 100, z), new THREE.Vector3(0, -1, 0));
+      return raycaster.intersectObject(surface, false)[0]?.point.y ?? 0;
+    };
     const boundPan = () => {
-      if (controls.target.y !== 0) {
-        camera.position.y -= controls.target.y;
-        controls.target.y = 0;
-      }
-      camera.position.y = Math.max(cameraFloor, camera.position.y);
-      const displacement = controls.target.clone().sub(initialTarget);
+      const targetHeight = viewMode === "surface" ? 0.8 : 0;
+      const heightShift = targetHeight - controls.target.y;
+      controls.target.y += heightShift;
+      camera.position.y += heightShift;
+      const displacement = controls.target.clone();
       displacement.y = 0;
       const distance = displacement.length();
-      const limit = 5;
+      const limit = viewMode === "surface" ? 7 : 5;
       if (distance > limit) {
         const correction = displacement.multiplyScalar((distance - limit) / distance);
         controls.target.sub(correction);
         camera.position.sub(correction);
       }
+      const floor = viewMode === "surface"
+        ? groundAt(camera.position.x, camera.position.z) + 0.55
+        : inspectionFloor;
+      if (camera.position.y < floor) camera.position.y = floor;
     };
+
+    const shiftPan = (event: PointerEvent) => {
+      controls.mouseButtons.LEFT = event.shiftKey ? THREE.MOUSE.PAN : THREE.MOUSE.ROTATE;
+    };
+    const restoreOrbit = () => { controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE; };
+    renderer.domElement.addEventListener("pointerdown", shiftPan, true);
+    window.addEventListener("pointerup", restoreOrbit);
+    window.addEventListener("pointercancel", restoreOrbit);
 
     const resize = () => {
       const width = Math.max(1, parent.clientWidth);
@@ -361,6 +399,7 @@ export default function TerrainScene({
     const animate = () => {
       controls.update();
       boundPan();
+      camera.lookAt(controls.target);
       sky.position.copy(camera.position);
       renderer.render(scene, camera);
       frame = requestAnimationFrame(animate);
@@ -374,6 +413,9 @@ export default function TerrainScene({
       parent.removeEventListener("orbis-reset-view", reset);
       parent.removeEventListener("orbis-face-sun", faceSun);
       observer.disconnect();
+      renderer.domElement.removeEventListener("pointerdown", shiftPan, true);
+      window.removeEventListener("pointerup", restoreOrbit);
+      window.removeEventListener("pointercancel", restoreOrbit);
       controls.dispose();
       objects.current = null;
       geometries.forEach((geometry) => geometry.dispose());
@@ -382,7 +424,7 @@ export default function TerrainScene({
       renderer.dispose();
       renderer.domElement.remove();
     };
-  }, [patch, siteLabel]);
+  }, [patch, siteLabel, viewMode]);
 
   useEffect(() => {
     const current = objects.current;
@@ -405,14 +447,15 @@ export default function TerrainScene({
     current.earthLabel.position.copy(earthDir).multiplyScalar(160).add(new THREE.Vector3(0, 6, 0));
     current.sunlight.position.copy(sunDir).multiplyScalar(45);
     current.sunlight.intensity = 2.5 * (ephemeris.sun.terrain_visible_fraction ?? 0);
-  }, [ephemeris, patch]);
+  }, [ephemeris, patch, viewMode]);
 
   return (
     <div ref={container} className="relative h-full min-h-0 w-full overflow-hidden">
       <span className="pointer-events-none absolute bottom-2 left-2 z-10 hidden max-w-[85%] bg-[#171b20]/90 px-2 py-1 text-[10px] text-[#d0d0d0] sm:block">
-        Orbit: drag · Pan: Shift+drag · Zoom: wheel · Local spherical patch · Relief ×3
+        Orbit: drag | Pan: Shift+drag or right drag | Zoom: wheel | 2x vertical relief
       </span>
       <div className="absolute right-2 top-2 z-10 flex gap-1">
+        <button type="button" className="bg-[#30363d] px-2 py-1 text-[11px] text-white hover:bg-[#46505a]" onClick={() => setViewMode(mode => mode === "inspection" ? "surface" : "inspection")}>{viewMode === "inspection" ? "Surface view" : "Inspection view"}</button>
         {ephemeris && <button type="button" className="bg-[#30363d] px-2 py-1 text-[11px] text-white hover:bg-[#46505a]"
           onClick={() => container.current?.dispatchEvent(new CustomEvent("orbis-face-sun", {
             detail: { azimuth: ephemeris.sun.azimuth_deg },

@@ -309,6 +309,8 @@ def local_terrain_patch(
                     valid &= values.data != src.nodata
                 if np.count_nonzero(valid) < 100:
                     continue
+                if not valid[64, 64]:
+                    continue
                 z = np.where(valid, values.data, np.nan).astype(np.float64)
                 return {
                     "width_m": width_m,
