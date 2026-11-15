@@ -4,6 +4,12 @@ A tool for exploring lunar landing sites and planning missions around the Moon's
 
 ORBIS aims to make it easier to explore potential landing locations, compare mission conditions, and work together on lunar mission plans.
 
+## Project Demonstration
+
+[Watch the ORBIS Demo](media/Orbis.mp4)
+
+A 30-second demonstration of ORBIS, developed for the 2026 NASA Space Apps Challenge!
+
 ## Getting Started
 
 To run ORBIS locally, you'll need Node.js and Python installed.
@@ -163,6 +169,13 @@ Lunar terrain datasets are provided by NASA's Goddard Space Flight Center throug
 Astronomical ephemeris and lunar reference-frame data are provided by NASA/JPL's Navigation and Ancillary Information Facility through the SPICE system.
 
 Lunar landmark names and official feature-center coordinates are sourced from the [USGS Gazetteer of Planetary Nomenclature](https://planetarynames.wr.usgs.gov/Page/MOON/target). Additional image and educational references are listed in the [Featured Lunar Landmarks](#featured-lunar-landmarks) section; each image must also retain its individual credit.
+
+### Media Credits
+
+- Music: "Stylz" - Ahjay Stelino (Mixkit)
+- Lunar footage: "Digitally Generated Planet" - Crime Lab (Pexels)
+
+Footage and music are used under their respective free-use licenses.
 
 ## License
 
