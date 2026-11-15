@@ -12,8 +12,13 @@ type Result = { regions: SearchRegion[]; grid: SearchGridCell[]; grid_spacing_m:
   slope_unchecked_cells?: number | null; slope_excluded_cells?: number | null; slope_warning?: string | null;
   roughness_limit_m?: number | null; roughness_screened_cells?: number | null;
   roughness_unchecked_cells?: number | null; roughness_excluded_cells?: number | null;
-  surface_measured_cells?: number; landing_uncertainty_m?: number; uncertainty_resolution_limited?: boolean };
-type Job = { status: "running" | "completed" | "failed"; progress: number; result: Result | null; error: string | null };
+  surface_measured_cells?: number; landing_uncertainty_m?: number; uncertainty_resolution_limited?: boolean;
+  min_area_km2?: number; screening?: { covered_cells: number; darkness_pass_cells: number | null;
+    earth_outage_pass_cells: number | null; all_cell_filters_pass_cells: number; uncertainty_pass_cells: number } };
+type Job<T> = { status: "running" | "completed" | "failed"; progress: number; result: T | null; error: string | null };
+type PolarResult = { results: { latitude: number; longitude: number; longest_darkness_hours: number;
+  longest_earth_outage_hours: number; meets_limits: boolean }[]; sampled_points: number;
+  covered_points: number; passing_points: number; time_step_hours: number; coverage: string };
 type Prefill = { revision: number; arrival: string; duration: number; darkness: number; earthOutage: number } | null;
 type Props = { area: Area; onAreaChange: (area: Area) => void;
   uncertainty: number; onUncertaintyChange: (value: number) => void;
@@ -41,11 +46,16 @@ export default function ExploreSearch({ area, onAreaChange, onRegions, onCreateP
   const [progress, setProgress] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [polarResult, setPolarResult] = useState<PolarResult | null>(null);
+  const [polarRunning, setPolarRunning] = useState(false);
+  const [polarProgress, setPolarProgress] = useState(0);
+  const [polarError, setPolarError] = useState("");
   const controller = useRef<AbortController | null>(null);
+  const polarController = useRef<AbortController | null>(null);
   const currentSearch = useRef<{ arrival: string; duration: number; body: object } | null>(null);
   const requestedArea = useRef<Area | null>(null);
 
-  useEffect(() => () => controller.current?.abort(), []);
+  useEffect(() => () => { controller.current?.abort(); polarController.current?.abort(); }, []);
   useEffect(() => setCenter({ latitude: String(area.latitude), longitude: String(area.longitude), radius: String(area.radius_m / 1000) }),
     [area.latitude, area.longitude, area.radius_m]);
   useEffect(() => {
@@ -62,6 +72,9 @@ export default function ExploreSearch({ area, onAreaChange, onRegions, onCreateP
   }, [prefill?.revision]);
   useEffect(() => {
     controller.current?.abort();
+    polarController.current?.abort();
+    setPolarRunning(false);
+    setPolarResult(null);
     setRunning(false);
     setResult(null);
     setSuggestions([]);
@@ -105,8 +118,9 @@ export default function ExploreSearch({ area, onAreaChange, onRegions, onCreateP
       onAreaChange({ latitude, longitude, radius_m });
   }
 
-  async function scan(body: object, signal: AbortSignal, onProgress: (fraction: number) => void): Promise<Result> {
-    const started = await fetch("/api/visibility/regions/jobs", {
+  async function scan<T = Result>(body: object, signal: AbortSignal, onProgress: (fraction: number) => void,
+      endpoint = "/api/visibility/regions/jobs"): Promise<T> {
+    const started = await fetch(endpoint, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal,
     });
     if (!started.ok) {
@@ -117,7 +131,7 @@ export default function ExploreSearch({ area, onAreaChange, onRegions, onCreateP
     for (;;) {
       const response = await fetch(`/api/visibility/jobs/${encodeURIComponent(id)}`, { signal });
       if (!response.ok) throw new Error(`Search status unavailable (${response.status})`);
-      const job = await response.json() as Job;
+      const job = await response.json() as Job<T>;
       if (job.status === "failed") throw new Error(job.error || "Search failed");
       if (job.status === "completed") {
         if (!job.result) throw new Error("Search returned no result");
@@ -129,6 +143,36 @@ export default function ExploreSearch({ area, onAreaChange, onRegions, onCreateP
         function cancelled() { window.clearTimeout(timer); reject(new DOMException("Cancelled", "AbortError")); }
         signal.addEventListener("abort", cancelled, { once: true });
       });
+    }
+  }
+
+  async function sweepPole() {
+    const date = new Date(`${arrival}:00Z`);
+    const hours = Number(duration);
+    const sun = Number(sunLimit);
+    const earth = Number(earthLimit);
+    if (!Number.isFinite(date.getTime()) || !Number.isInteger(hours) || hours < 1 || hours > 8760 ||
+      !sunLimit.trim() || !earthLimit.trim() || !Number.isFinite(sun) || sun < 0 || sun > 8760 ||
+      !Number.isFinite(earth) || earth < 0 || earth > 8760) {
+      setPolarError("Enter a valid UTC arrival, mission duration, darkness limit, and Earth-outage limit.");
+      return;
+    }
+    polarController.current?.abort();
+    const next = new AbortController();
+    polarController.current = next;
+    setPolarError("");
+    setPolarResult(null);
+    setPolarRunning(true);
+    setPolarProgress(0);
+    try {
+      const found = await scan<PolarResult>({ arrival_utc: date.toISOString(), duration_hours: hours,
+        max_no_sun_hours: sun, max_no_earth_hours: earth }, next.signal, setPolarProgress,
+        "/api/visibility/polar-sweep/jobs");
+      if (!next.signal.aborted) setPolarResult(found);
+    } catch (reason) {
+      if (!next.signal.aborted) setPolarError(reason instanceof Error ? reason.message : "Polar sweep failed");
+    } finally {
+      if (!next.signal.aborted) setPolarRunning(false);
     }
   }
 
@@ -302,13 +346,37 @@ export default function ExploreSearch({ area, onAreaChange, onRegions, onCreateP
     </details>
     <button type="button" disabled={running} onClick={() => void search()}
       className="min-h-10 w-full bg-accent px-3 py-2 text-xs font-medium text-white transition-[filter] hover:brightness-90 disabled:cursor-wait disabled:opacity-50">{running ? progress || "Calculating…" : "Search candidate areas"}</button>
+    <section className="orbis-panel space-y-3 p-3">
+      <div><h3 className="font-medium text-white">Broad south-polar sweep</h3>
+        <p className="mt-1 text-[11px] text-[#aaa]">Check coarse points across the available 80°S–90°S DEM using the mission timing and two outage limits above. Use a result to move the local search area.</p></div>
+      <button type="button" disabled={polarRunning} onClick={() => void sweepPole()}
+        className="min-h-9 border border-accent px-3 text-accent hover:bg-[#303b40] disabled:opacity-50">
+        {polarRunning ? `Sweeping… ${Math.round(polarProgress * 100)}%` : "Sweep south-polar coverage"}</button>
+      {polarError && <p role="alert" className="text-[#ef9292]">{polarError}</p>}
+      {polarResult && <div className="space-y-2">
+        <p className="text-[11px] text-[#aeb6ba]">{polarResult.covered_points} of {polarResult.sampled_points} coarse points have complete sampled horizons; {polarResult.passing_points} meet both limits. Time step ~{polarResult.time_step_hours} h. Results are individual points, not verified candidate areas.</p>
+        {!polarResult.results.length && <p className="text-[#aeb6ba]">No points with complete horizon coverage in this sweep.</p>}
+        {polarResult.results.map((point, index) => <div key={`${point.latitude}-${point.longitude}`} className="flex flex-wrap items-center justify-between gap-2 border border-[#50575b] bg-[#303030] p-2">
+          <div><span className="font-medium text-white">{String(index + 1).padStart(2, "0")} · {point.latitude.toFixed(2)}°, {point.longitude.toFixed(2)}°</span>
+            <span className={`ml-2 text-[11px] ${point.meets_limits ? "text-success" : "text-[#ffbf70]"}`}>{point.meets_limits ? "Within limits" : "Closest alternative"}</span>
+            <p className="text-[11px] text-[#aeb6ba]">Longest darkness {point.longest_darkness_hours} h · Earth outage {point.longest_earth_outage_hours} h</p></div>
+          <button type="button" className="min-h-9 border border-[#596269] px-2 text-accent hover:border-accent" onClick={() => {
+            const nextArea = { latitude: point.latitude, longitude: point.longitude, radius_m: area.radius_m };
+            setCenter({ latitude: String(point.latitude), longitude: String(point.longitude), radius: String(area.radius_m / 1000) });
+            onAreaChange(nextArea);
+          }}>Search nearby</button>
+        </div>)}
+        <p className="text-[10px] text-[#9ba4a9]">Coarse 80 m DEM horizon and time samples can miss shorter outages or small suitable areas. Search nearby before treating any point as a candidate.</p>
+      </div>}
+    </section>
     {error && <p role="alert" className="text-[#ef9292]">{error}</p>}
     {result && <section className="space-y-2 border-t border-[#444] pt-3">
       <div className="flex flex-wrap items-end justify-between gap-2"><h3 className="font-medium text-white">Candidate areas</h3>
         <span className="text-[11px] text-[#aeb6ba]">{result.evaluated_cells} sampled cells · {result.grid_spacing_m} m grid</span></div>
       {result.surface_measured_cells !== undefined && <p className="text-[11px] text-[#aeb6ba]">Coarse surface measurements available at {result.surface_measured_cells} of {result.evaluated_cells} sampled cells.</p>}
       {result.uncertainty_resolution_limited && <p className="text-[11px] text-[#ffbf70]">Landing uncertainty is smaller than the {Math.round(result.grid_spacing_m)} m search grid. Variations between sampled cells cannot be checked.</p>}
-      <p className="text-[11px] text-[#aeb6ba]">{result.color_mode === "mission_needs" ? "Green meets entered limits; yellow is close; red misses them." : "Green ≥70%, yellow ≥35%, red <35% by weighted visibility."} Gray marks missing DEM or unchecked terrain limits. Colors are screening estimates, not landing safety.</p>
+      <p className="text-[11px] text-[#aeb6ba]">{result.color_mode === "mission_needs" ? "Green grid cells meet entered limits; a green patch has at least 75% qualifying sampled cells. Yellow is close; red misses the limits." : "Green ≥70%, yellow ≥35%, red <35% by weighted visibility."} Gray marks missing DEM or unchecked terrain limits. Colors are screening estimates, not landing safety.</p>
+      {result.screening && !result.regions.some(region => region.band === "green") && <p className="border-l-2 border-[#ff9900] bg-[#33302b] p-2 text-[11px] text-[#ded3c5]">Why no green patch? Of {result.screening.covered_cells} DEM-covered cells, {result.screening.darkness_pass_cells ?? "—"} pass the darkness limit and {result.screening.earth_outage_pass_cells ?? "—"} pass the Earth-outage limit. {result.screening.all_cell_filters_pass_cells} pass all point-level filters; {result.screening.uncertainty_pass_cells} also pass the sampled {result.landing_uncertainty_m ?? 0} m uncertainty footprint. A patch needs at least {result.min_area_km2 ?? "the selected minimum"} km² and 75% qualifying cells.</p>}
       {result.outside_coverage_cells > 0 && <p className="text-[11px] text-[#aeb6ba]">{result.outside_coverage_cells} cells outside map coverage.</p>}
       {result.slope_limit_deg != null && <p className="text-[11px] text-[#aeb6ba]">Slope ≤{result.slope_limit_deg}°: {result.slope_screened_cells} screened ({result.slope_5m_cells} at 5 m, {result.slope_80m_cells} at 80 m), {result.slope_excluded_cells} too steep, {result.slope_unchecked_cells} unchecked. Missing slope data skips this filter for those cells.</p>}
       {result.roughness_limit_m != null && <p className="text-[11px] text-[#aeb6ba]">Roughness ≤{result.roughness_limit_m} m: {result.roughness_screened_cells} screened, {result.roughness_excluded_cells} above limit, {result.roughness_unchecked_cells} unchecked. Measured from 80 m DEM heights within 400 m; missing values skip the filter.</p>}

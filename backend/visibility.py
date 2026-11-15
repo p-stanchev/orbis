@@ -56,6 +56,19 @@ class WindowSearchRequest(VisibilityRequest):
     landing_uncertainty_m: float = Field(default=0, ge=0, le=5000)
 
 
+class PolarSweepRequest(BaseModel):
+    arrival_utc: datetime
+    duration_hours: float = Field(gt=0, le=8760)
+    max_no_sun_hours: float = Field(ge=0, le=8760)
+    max_no_earth_hours: float = Field(ge=0, le=8760)
+    recalculate: bool = False
+
+    @field_validator("arrival_utc")
+    @classmethod
+    def timezone_required(cls, value: datetime) -> datetime:
+        return VisibilityRequest.timezone_required(value)
+
+
 def timestamp_text(value: datetime) -> str:
     return value.isoformat(timespec="seconds").replace("+00:00", "Z")
 
@@ -433,8 +446,13 @@ def compute_region(job_id: str, data: RegionRequest) -> None:
                 streak[kind] = np.where(seen, 0, streak[kind] + step_hours)
                 longest[kind] = np.maximum(longest[kind], streak[kind])
                 if kind == "earth":
-                    day = min(day_count - 1, int((step + 0.5) * step_hours / 24))
-                    daily_earth[day] += seen * step_hours
+                    opening = step * step_hours
+                    closing = min(data.duration_hours, (step + 1) * step_hours)
+                    day = min(day_count - 1, int(opening / 24))
+                    boundary = min(closing, (day + 1) * 24)
+                    daily_earth[day] += seen * (boundary - opening)
+                    if closing > boundary and day + 1 < day_count:
+                        daily_earth[day + 1] += seen * (closing - boundary)
             if step % 10 == 0 or step == steps - 1:
                 with _jobs_lock:
                     _jobs[job_id]["progress"] = round(0.25 + 0.7 * (step + 1) / steps, 3)
@@ -452,6 +470,7 @@ def compute_region(job_id: str, data: RegionRequest) -> None:
         eligible &= least_daily_earth >= data.min_daily_earth_hours
         eligible &= np.all(np.isfinite(horizon), axis=1)
         eligible &= ~(too_steep | too_rough)
+        point_eligible = eligible.copy()
         lookup = {cell: index for index, cell in enumerate(cells)}
         covered = np.all(np.isfinite(horizon), axis=1)
         if data.landing_uncertainty_m > 0:
@@ -502,6 +521,9 @@ def compute_region(job_id: str, data: RegionRequest) -> None:
             used.update(group)
             representative = max(group, key=lambda index: (eligible[index], terrain_checked[index], score[index]))
             area = len(group) * cell_area
+            center_vector = np.mean(up[group], axis=0)
+            center_latitude = math.degrees(math.atan2(center_vector[2], math.hypot(center_vector[0], center_vector[1])))
+            center_longitude = math.degrees(math.atan2(center_vector[1], center_vector[0])) if math.hypot(center_vector[0], center_vector[1]) > 1e-12 else positions[representative][1]
             band = ("green" if meeting >= 0.75 else "yellow" if meeting >= 0.25 else "red") if mission_needs else \
                 ("green" if quality >= 70 else "yellow" if quality >= 35 else "red")
             regions.append({"area_km2": round(area, 2), "score": round(average, 1),
@@ -525,8 +547,8 @@ def compute_region(job_id: str, data: RegionRequest) -> None:
                             "least_daily_earth_hours": round(float(np.min(least_daily_earth[group])), 1),
                             "sun_range": [round(float(np.min(sun[group])), 1), round(float(np.max(sun[group])), 1)],
                             "earth_range": [round(float(np.min(earth[group])), 1), round(float(np.max(earth[group])), 1)],
-                            "center_latitude": round(float(np.mean([positions[i][0] for i in group])), 6),
-                            "center_longitude": round(float(np.mean([positions[i][1] for i in group])), 6),
+                            "center_latitude": round(center_latitude, 6),
+                            "center_longitude": round(center_longitude, 6),
                             "representative_latitude": round(positions[representative][0], 6),
                             "representative_longitude": round(positions[representative][1], 6),
                             "cells": [{"latitude": round(positions[i][0], 6),
@@ -550,6 +572,14 @@ def compute_region(job_id: str, data: RegionRequest) -> None:
                                          "outside_coverage_cells": outside_coverage,
                                          "landing_uncertainty_m": data.landing_uncertainty_m,
                                          "uncertainty_resolution_limited": 0 < data.landing_uncertainty_m < spacing,
+                                         "min_area_km2": data.min_area_km2,
+                                         "screening": {
+                                             "covered_cells": int(np.count_nonzero(covered)),
+                                             "darkness_pass_cells": int(np.count_nonzero(covered & (longest["sun"] <= data.max_no_sun_hours))) if data.max_no_sun_hours is not None else None,
+                                             "earth_outage_pass_cells": int(np.count_nonzero(covered & (longest["earth"] <= data.max_no_earth_hours))) if data.max_no_earth_hours is not None else None,
+                                             "all_cell_filters_pass_cells": int(np.count_nonzero(point_eligible)),
+                                             "uncertainty_pass_cells": int(np.count_nonzero(eligible)),
+                                         },
                                          "slope_limit_deg": data.max_slope_deg,
                                          "slope_screened_cells": int(np.count_nonzero(slope_known)) if data.max_slope_deg is not None else None,
                                          "slope_5m_cells": sum(item is not None and item["resolution_m"] == 5 for item in slope_results) if data.max_slope_deg is not None else None,
@@ -569,13 +599,110 @@ def compute_region(job_id: str, data: RegionRequest) -> None:
             _jobs[job_id].update(status="failed", error=str(exc))
 
 
+def compute_polar_sweep(job_id: str, data: PolarSweepRequest) -> None:
+    try:
+        positions = [(-90.0, 0.0)]
+        for latitude in np.arange(-89.5, -80.4, 1.0):
+            circumference = 2 * math.pi * 1737400 * math.cos(math.radians(latitude))
+            count = max(8, round(circumference / 30000))
+            positions.extend((float(latitude), -180 + 360 * index / count) for index in range(count))
+        horizon = np.concatenate([terrain_horizons(positions[index:index + 16])
+                                  for index in range(0, len(positions), 16)])
+        covered = np.all(np.isfinite(horizon), axis=1)
+        with _jobs_lock:
+            _jobs[job_id]["progress"] = 0.3
+        latitudes = np.deg2rad(np.array([point[0] for point in positions]))
+        longitudes = np.deg2rad(np.array([point[1] for point in positions]))
+        up = np.stack((np.cos(latitudes) * np.cos(longitudes),
+                       np.cos(latitudes) * np.sin(longitudes), np.sin(latitudes)), axis=1)
+        east = np.stack((-np.sin(longitudes), np.cos(longitudes), np.zeros(len(positions))), axis=1)
+        north = np.stack((-np.sin(latitudes) * np.cos(longitudes),
+                          -np.sin(latitudes) * np.sin(longitudes), np.cos(latitudes)), axis=1)
+        samples = max(1, math.ceil(data.duration_hours / max(6, data.duration_hours / 500)))
+        step_hours = data.duration_hours / samples
+        streak = {kind: np.zeros(len(positions)) for kind in ("sun", "earth")}
+        longest = {kind: np.zeros(len(positions)) for kind in streak}
+        for step in range(samples):
+            utc = data.arrival_utc + timedelta(hours=(step + 0.5) * step_hours)
+            with spice_lock:
+                load_kernels()
+                et = spice.utc2et(utc.strftime("%Y-%m-%dT%H:%M:%S.%f"))
+                vectors = {kind: spice.spkpos(kind.upper(), et, "MOON_ME", "LT+S", "MOON")[0]
+                           for kind in streak}
+            for kind, xyz in vectors.items():
+                topocentric = np.asarray(xyz)[None, :] - 1737.4 * up
+                length = np.linalg.norm(topocentric, axis=1)
+                ray = topocentric / length[:, None]
+                altitude = np.rad2deg(np.arcsin(np.clip(np.sum(ray * up, axis=1), -1, 1)))
+                azimuth = np.rad2deg(np.arctan2(np.sum(ray * east, axis=1),
+                                                np.sum(ray * north, axis=1))) % 360
+                index = azimuth / 2
+                lower = np.floor(index).astype(int) % 180
+                fraction = index - np.floor(index)
+                obstruction = horizon[np.arange(len(positions)), lower] * (1 - fraction) + \
+                    horizon[np.arange(len(positions)), (lower + 1) % 180] * fraction
+                radius_km = 695700.0 if kind == "sun" else 6378.137
+                angular_radius = np.rad2deg(np.arcsin(np.clip(radius_km / length, 0, 1)))
+                seen = altitude + angular_radius > obstruction
+                streak[kind] = np.where(seen, 0, streak[kind] + step_hours)
+                longest[kind] = np.maximum(longest[kind], streak[kind])
+            if step % 10 == 0 or step == samples - 1:
+                with _jobs_lock:
+                    _jobs[job_id]["progress"] = round(0.3 + 0.7 * (step + 1) / samples, 3)
+        feasible = covered & (longest["sun"] <= data.max_no_sun_hours) & \
+            (longest["earth"] <= data.max_no_earth_hours)
+        ranked = sorted((index for index in range(len(positions)) if covered[index]),
+                        key=lambda index: (not feasible[index],
+                                           max(0, longest["sun"][index] - data.max_no_sun_hours) +
+                                           max(0, longest["earth"][index] - data.max_no_earth_hours),
+                                           longest["sun"][index] + longest["earth"][index]))
+        selected = []
+        for index in ranked:
+            if any(math.acos(float(np.clip(np.dot(up[index], up[other]), -1, 1))) * 1737.4 < 20
+                   for other in selected):
+                continue
+            selected.append(index)
+            if len(selected) == 12:
+                break
+        results = [{"latitude": positions[index][0], "longitude": positions[index][1],
+                    "longest_darkness_hours": round(float(longest["sun"][index]), 1),
+                    "longest_earth_outage_hours": round(float(longest["earth"][index]), 1),
+                    "meets_limits": bool(feasible[index])} for index in selected]
+        with _jobs_lock:
+            _jobs[job_id].update(status="completed", progress=1.0,
+                                 result={"results": results, "sampled_points": len(positions),
+                                         "covered_points": int(np.count_nonzero(covered)),
+                                         "passing_points": int(np.count_nonzero(feasible)),
+                                         "time_step_hours": round(step_hours, 2),
+                                         "coverage": "80°S–90°S; coarse isolated points, not candidate areas"})
+    except Exception as exc:
+        with _jobs_lock:
+            _jobs[job_id].update(status="failed", error=str(exc))
+
+
+@router.post("/polar-sweep/jobs", status_code=202)
+def start_polar_sweep(data: PolarSweepRequest):
+    key = ("polar-sweep", timestamp_text(data.arrival_utc), round(data.duration_hours, 4),
+           data.max_no_sun_hours, data.max_no_earth_hours, "polar-sweep-v1")
+    with _jobs_lock:
+        existing = _keys.get(key)
+        if not data.recalculate and existing and existing in _jobs and _jobs[existing]["status"] != "failed":
+            return {"id": existing, "status": _jobs[existing]["status"]}
+        job_id = str(uuid4())
+        _keys[key] = job_id
+        _jobs[job_id] = {"id": job_id, "status": "running", "progress": 0.0,
+                         "result": None, "error": None}
+    executor.submit(compute_polar_sweep, job_id, data)
+    return {"id": job_id, "status": "running"}
+
+
 @router.post("/regions/jobs", status_code=202)
 def start_region(data: RegionRequest):
     key = ("region", round(data.latitude, 6), round(data.longitude, 6),
            round(data.radius_m, 1), timestamp_text(data.arrival_utc),
            round(data.duration_hours, 4), data.sun_weight, data.max_no_sun_hours,
            data.max_no_earth_hours, data.min_daily_earth_hours, data.min_area_km2,
-           data.max_slope_deg, data.max_roughness_m, data.landing_uncertainty_m, "regions-v9")
+           data.max_slope_deg, data.max_roughness_m, data.landing_uncertainty_m, "regions-v10")
     with _jobs_lock:
         existing = _keys.get(key)
         if not data.recalculate and existing and existing in _jobs and _jobs[existing]["status"] != "failed":
