@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Globe2, Sun, Play, Pause } from "lucide-react";
 import TerrainScene, { type CelestialBody, type Ephemeris, type TerrainPatch } from "./TerrainScene";
+import SplitWorkspace from "./SplitWorkspace";
 
 type Props = {
   latitude: number;
@@ -8,6 +9,7 @@ type Props = {
   arrivalUtc: string;
   durationHours: number;
   siteName: string;
+  map: ReactNode;
 };
 
 const fmt = (date: Date) => Number.isFinite(date.getTime())
@@ -20,7 +22,7 @@ const bodyStatus = (body: CelestialBody) => {
   return "Above terrain horizon";
 };
 
-export default function MissionAnalysis({ latitude, longitude, arrivalUtc, durationHours, siteName }: Props) {
+export default function MissionAnalysis({ latitude, longitude, arrivalUtc, durationHours, siteName, map }: Props) {
   const [elapsed, setElapsed] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [result, setResult] = useState<Ephemeris | null>(null);
@@ -89,15 +91,17 @@ export default function MissionAnalysis({ latitude, longitude, arrivalUtc, durat
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#191919] text-[#ddd]">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#444] px-3 py-2 text-xs">
-        <span className="min-w-0 text-white">3D LOCAL HORIZON <span className="ml-2 text-[#999]">{siteName}</span></span>
+        <span className="min-w-0 text-white">MISSION ANALYSIS <span className="ml-2 text-[#999]">{siteName}</span></span>
         <span className="text-[10px] text-[#999]">{terrain?.resolution ? `LOLA ${terrain.resolution}` : "Local DEM"}{terrain ? ` · ${Math.round(terrain.coverage_fraction * 100)}% coverage` : ""}</span>
       </div>
-      <div className="relative min-h-0 flex-1">
-        <TerrainScene patch={terrain} ephemeris={result} siteLabel={siteName} />
-        {terrainError && <p className="absolute left-3 right-3 top-3 bg-[#292929] p-2 text-xs text-[#ef9292]">{terrainError}. No terrain surface displayed.</p>}
-        {!terrain && !terrainError && <p className="pointer-events-none absolute left-3 top-3 bg-[#292929]/80 p-2 text-xs">Loading local DEM...</p>}
-      </div>
-      <div className="orbis-scroll max-h-[55%] space-y-2 overflow-y-auto overscroll-contain border-t border-[#444] bg-[#252525] p-2.5 text-xs leading-relaxed sm:max-h-[48%] sm:p-3">
+      <SplitWorkspace active splitId="analysis" primary={map} secondary={
+        <div className="relative h-full min-h-0">
+          <TerrainScene patch={terrain} ephemeris={result} siteLabel={siteName} />
+          {terrainError && <p className="absolute left-3 right-3 top-3 bg-[#292929] p-2 text-xs text-[#ef9292]">{terrainError}. No terrain surface displayed.</p>}
+          {!terrain && !terrainError && <p className="pointer-events-none absolute left-3 top-3 bg-[#292929]/80 p-2 text-xs">Loading local DEM...</p>}
+        </div>
+      } />
+      <div className="orbis-scroll max-h-[45%] shrink-0 space-y-2 overflow-y-auto overscroll-contain border-t border-[#444] bg-[#252525] p-2.5 text-xs leading-relaxed sm:max-h-[40%] sm:p-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <span className="text-[#bbb]">MISSION TIME</span>
           <span className="font-mono text-[#eee]">{fmt(viewTime)}</span>

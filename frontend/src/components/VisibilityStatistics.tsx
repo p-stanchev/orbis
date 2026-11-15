@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Globe2, Sun } from "lucide-react";
+import SiteComparison from "./SiteComparison";
 
 type Window = { start_utc: string; end_utc: string; hours: number };
 type BodyStats = {
@@ -40,10 +41,12 @@ type Region = { regions: SearchRegion[]; grid: SearchGridCell[]; sample_count: n
   color_mode: "mission_needs" | "relative_visibility"; model: string };
 type RegionJob = { id: string; status: "running" | "completed" | "failed"; progress: number; result: Region | null; error: string | null };
 type Props = { latitude: number; longitude: number; arrivalUtc: string; durationHours: number;
-  project: { id: string; center_latitude: number; center_longitude: number; radius_m: number };
+  project: { id: string; center_latitude: number; center_longitude: number; radius_m: number;
+    sites: { id: string; name: string; latitude: number; longitude: number }[] };
   probePoint: { latitude: number; longitude: number } | null;
   onProbePoint: (point: { latitude: number; longitude: number } | null) => void;
   onProbeMode: (enabled: boolean) => void;
+  onSelectSite: (siteId: string) => void;
   onSaveMission: (changes: { arrival_utc?: string; duration_hours?: number }) => Promise<void>;
   onRegions?: (projectId: string, regions: SearchRegion[], grid: SearchGridCell[], spacing: number) => void };
 
@@ -51,24 +54,28 @@ function formatDate(utc: string) { return utc.slice(0, 16).replace("T", " ") + "
 
 function Results({ label, stats, color }: { label: "Sun" | "Earth" | "Sun and Earth"; stats: BodyStats; color: string }) {
   return (
-    <section className="orbis-panel min-w-0 space-y-2 p-3">
-      <div className="flex items-center gap-2 font-medium" style={{ color }}>
-        {label === "Sun" ? <Sun size={16} /> : <Globe2 size={16} />}
-        {label} · terrain horizon visibility
+    <section className="orbis-panel min-w-0 p-2">
+      <div className="flex min-w-0 items-center gap-2 text-sm font-medium" style={{ color }}>
+        {label === "Sun" ? <Sun size={17} className="shrink-0" /> : <Globe2 size={17} className="shrink-0" />}
+        <span className="truncate">{label === "Sun and Earth" ? "Sun + Earth" : label}</span>
       </div>
-      <div className="grid grid-cols-3 gap-2 text-center">
-        <div className="bg-[#353535] p-2"><div className="text-base text-white">{stats.visible_percent.toFixed(1)}%</div><div className="text-[10px] text-[#aaa]">Time visible</div></div>
-        <div className="bg-[#353535] p-2"><div className="text-base text-white">{stats.visible_hours.toFixed(1)}h</div><div className="text-[10px] text-[#aaa]">Visible total</div></div>
-        <div className="bg-[#353535] p-2"><div className="text-base text-white">{stats.window_count}</div><div className="text-[10px] text-[#aaa]">Windows</div></div>
+      <div className="mt-0.5 pl-[25px] text-[10px] text-[#aaa]">Terrain horizon</div>
+      <div className="mt-2 space-y-1">
+        <div className="flex items-center justify-between gap-1 bg-[#353535] px-1.5 py-1.5"><span className="text-[10px] text-[#aaa]">Visible</span><span className="whitespace-nowrap font-mono text-xs tabular-nums text-white">{stats.visible_percent.toFixed(1)}%</span></div>
+        <div className="flex items-center justify-between gap-1 bg-[#353535] px-1.5 py-1.5"><span className="text-[10px] text-[#aaa]">Hours</span><span className="whitespace-nowrap font-mono text-xs tabular-nums text-white">{stats.visible_hours.toFixed(1)}</span></div>
+        <div className="flex items-center justify-between gap-1 bg-[#353535] px-1.5 py-1.5"><span className="text-[10px] text-[#aaa]">Windows</span><span className="whitespace-nowrap font-mono text-xs tabular-nums text-white">{stats.window_count}</span></div>
       </div>
-      <div className="text-[#aaa]">Longest continuous hidden period: <span className="font-medium text-[#eee]">{stats.longest_hidden_hours.toFixed(1)} hours</span></div>
-      <details className="border-t border-[#444] pt-2">
-        <summary className="cursor-pointer text-[#ddd]">{stats.window_count ? `View ${stats.window_count} window${stats.window_count === 1 ? "" : "s"}` : "No visibility windows"}</summary>
-        <div className="orbis-scroll max-h-48 space-y-1 overflow-y-auto overscroll-contain">
+      <div className="mt-2 flex flex-wrap items-baseline justify-between gap-x-1 border-b border-[#444] pb-2 text-[#aaa]">
+        <span>Longest hidden</span><span className="whitespace-nowrap font-mono text-white">{stats.longest_hidden_hours.toFixed(1)} h</span>
+      </div>
+      <details className="pt-2">
+        <summary className="cursor-pointer text-[#ddd]">Visibility windows ({stats.window_count})</summary>
+        <div className="orbis-scroll mt-2 max-h-48 space-y-1 overflow-y-auto overscroll-contain">
           {stats.windows.map((window, index) => (
             <div key={`${window.start_utc}-${index}`} className="border-l-2 bg-[#343434] px-2 py-1.5" style={{ borderColor: color }}>
-              <div className="text-[#fff]">{formatDate(window.start_utc)}</div>
-              <div className="text-[#bbb]">to {formatDate(window.end_utc)} · {window.hours.toFixed(1)} h</div>
+              <div className="font-mono text-[11px] text-[#fff]">{formatDate(window.start_utc)}</div>
+              <div className="font-mono text-[11px] text-[#bbb]">to {formatDate(window.end_utc)}</div>
+              <div className="text-[10px] text-[#aaa]">{window.hours.toFixed(1)} h</div>
             </div>
           ))}
         </div>
@@ -78,7 +85,7 @@ function Results({ label, stats, color }: { label: "Sun" | "Earth" | "Sun and Ea
 }
 
 export default function VisibilityStatistics({ latitude, longitude, arrivalUtc, durationHours, project, probePoint,
-  onProbePoint, onProbeMode, onSaveMission, onRegions }: Props) {
+  onProbePoint, onProbeMode, onSelectSite, onSaveMission, onRegions }: Props) {
   const [job, setJob] = useState<Job | null>(null);
   const [region, setRegion] = useState<RegionJob | null>(null);
   const [regionError, setRegionError] = useState("");
@@ -215,7 +222,7 @@ export default function VisibilityStatistics({ latitude, longitude, arrivalUtc, 
     parameters.min_daily_earth_hours, parameters.min_area_km2, retry]);
 
   return (
-    <div className="space-y-3 pb-3 text-xs leading-relaxed">
+    <div className="orbis-statistics mx-auto max-w-[1200px] space-y-3 pb-3 text-xs leading-relaxed">
       <section className="orbis-panel space-y-3 p-3">
         <div className="font-medium text-white">Planning window · UTC</div>
         <div className="flex flex-wrap items-end gap-2">
@@ -248,6 +255,8 @@ export default function VisibilityStatistics({ latitude, longitude, arrivalUtc, 
         </div>
         {planningError && <p role="alert" className="text-[#ef9292]">{planningError}</p>}
       </section>
+      <SiteComparison key={`${project.id}-${arrivalUtc}-${durationHours}-${project.sites.map(site => `${site.id}:${site.latitude}:${site.longitude}`).join("|")}`}
+        sites={project.sites} arrivalUtc={arrivalUtc} durationHours={durationHours} onSelectSite={onSelectSite} />
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="font-medium text-white">Estimated visibility windows · {probePoint ? "inspected point" : "selected site / search center"}</div>
         <button type="button" disabled={job?.status === "running" || region?.status === "running"}
@@ -273,9 +282,11 @@ export default function VisibilityStatistics({ latitude, longitude, arrivalUtc, 
           <div><span className="text-[#aaa]">Coordinate</span><div className="text-white">{analysisLatitude.toFixed(6)}°, {analysisLongitude.toFixed(6)}°</div></div>
           <div><span className="text-[#aaa]">Sun and Earth together</span><div className="text-white">{job.result.both.visible_hours.toFixed(1)}h · {job.result.both.visible_percent.toFixed(1)}%</div></div>
         </section>
-        <Results label="Sun" stats={job.result.sun} color="#ff9900" />
-        <Results label="Earth" stats={job.result.earth} color="#03ace4" />
-        <Results label="Sun and Earth" stats={job.result.both} color="#60ba7b" />
+        <div className="orbis-result-grid">
+          <Results label="Sun" stats={job.result.sun} color="#ff9900" />
+          <Results label="Earth" stats={job.result.earth} color="#03ace4" />
+          <Results label="Sun and Earth" stats={job.result.both} color="#60ba7b" />
+        </div>
         <section className="orbis-panel space-y-2 p-3">
           <div className="font-medium text-white">Mission timeline</div>
           <div className="orbis-scroll max-h-64 overflow-y-auto overscroll-contain">

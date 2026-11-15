@@ -49,6 +49,23 @@ input:focus-visible {
   font-family: inherit;
 }
 
+.orbis-statistics {
+  container-type: inline-size;
+  container-name: statistics;
+}
+
+.orbis-result-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+@container statistics (max-width: 359px) {
+  .orbis-result-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .orbis-shell {
   display: grid;
   grid-template-columns: minmax(0, 1fr);

@@ -4,11 +4,8 @@ type Props = {
   active: boolean;
   primary: ReactNode;
   secondary: ReactNode;
+  splitId: string;
 };
-
-const STORAGE_KEY = "orbis-analysis-split-ratio-v1";
-const STACKED_STORAGE_KEY = "orbis-analysis-stacked-ratio-v1";
-const clamp = (value: number) => Math.max(15, Math.min(85, value));
 
 function initialRatio(key: string, fallback: number) {
   try {
@@ -19,28 +16,35 @@ function initialRatio(key: string, fallback: number) {
   }
 }
 
-export default function SplitWorkspace({ active, primary, secondary }: Props) {
+export default function SplitWorkspace({ active, primary, secondary, splitId }: Props) {
   const root = useRef<HTMLDivElement>(null);
   const dragging = useRef<number | null>(null);
-  const [wide, setWide] = useState(false);
-  const [wideRatio, setWideRatio] = useState(() => initialRatio(STORAGE_KEY, 50));
-  const [stackedRatio, setStackedRatio] = useState(() => initialRatio(STACKED_STORAGE_KEY, 38));
-  const ratio = wide ? wideRatio : stackedRatio;
+  const [size, setSize] = useState({ width: 0, height: 0 });
+  const wideKey = `orbis-${splitId}-split-ratio-v1`;
+  const stackedKey = `orbis-${splitId}-stacked-ratio-v1`;
+  const [wideRatio, setWideRatio] = useState(() => initialRatio(wideKey, 50));
+  const [stackedRatio, setStackedRatio] = useState(() => initialRatio(stackedKey, 38));
+  const wide = size.width >= 760;
+  const minRatio = Math.min(50, Math.max(15, (wide ? 289 / Math.max(1, size.width) : 189 / Math.max(1, size.height)) * 100));
+  const clamp = (value: number) => Math.max(minRatio, Math.min(100 - minRatio, value));
+  const ratio = clamp(wide ? wideRatio : stackedRatio);
   const setRatio = wide ? setWideRatio : setStackedRatio;
 
   useEffect(() => {
     if (!active || !root.current) return;
-    const observer = new ResizeObserver(entries => setWide(entries[0].contentRect.width >= 850));
+    const observer = new ResizeObserver(entries => setSize({ width: entries[0].contentRect.width, height: entries[0].contentRect.height }));
     observer.observe(root.current);
     return () => observer.disconnect();
   }, [active]);
 
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_KEY, String(wideRatio));
-      localStorage.setItem(STACKED_STORAGE_KEY, String(stackedRatio));
-    } catch {}
-  }, [wideRatio, stackedRatio]);
+      localStorage.setItem(wideKey, String(wideRatio));
+      localStorage.setItem(stackedKey, String(stackedRatio));
+    } catch {
+      return;
+    }
+  }, [wideKey, stackedKey, wideRatio, stackedRatio]);
 
   if (!active) {
     return <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden">{primary}</div>;
@@ -87,10 +91,10 @@ export default function SplitWorkspace({ active, primary, secondary }: Props) {
       <div
         role="separator"
         tabIndex={0}
-        aria-label="Resize lunar map and mission analysis"
+        aria-label={`Resize lunar map and ${splitId === "analysis" ? "3D viewer" : splitId === "statistics" ? "statistics" : "explore panel"}`}
         aria-orientation={wide ? "vertical" : "horizontal"}
-        aria-valuemin={15}
-        aria-valuemax={85}
+        aria-valuemin={Math.ceil(minRatio)}
+        aria-valuemax={Math.floor(100 - minRatio)}
         aria-valuenow={Math.round(ratio)}
         title="Drag to resize · Double-click for 50/50"
         className={`group z-20 flex select-none items-center justify-center bg-[#3f3f3f] outline-none hover:bg-[#03ace4]/35 focus-visible:bg-[#03ace4]/35 ${wide ? "cursor-col-resize" : "cursor-row-resize"}`}
@@ -109,10 +113,10 @@ export default function SplitWorkspace({ active, primary, secondary }: Props) {
             setRatio(current => clamp(current + (decrease ? -5 : 5)));
           } else if (event.key === "Home") {
             event.preventDefault();
-            setRatio(15);
+            setRatio(minRatio);
           } else if (event.key === "End") {
             event.preventDefault();
-            setRatio(85);
+            setRatio(100 - minRatio);
           } else if (event.key === "Enter") {
             setRatio(50);
           }

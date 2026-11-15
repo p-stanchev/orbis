@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent, type WheelEvent } from "react";
-import { Layers, LocateFixed, Minus, Plus } from "lucide-react";
+import { Layers, LocateFixed, Minus, Plus, X } from "lucide-react";
 import type { SearchRegion, SearchGridCell } from "./VisibilityStatistics";
 
 type Site = { id: string; name: string; latitude: number; longitude: number };
@@ -39,6 +39,7 @@ type Gesture = {
 };
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+const MAP_HINT_KEY = "orbis-map-hint-dismissed-v1";
 
 export default function LunarMap({ projects, hiddenProjectIds, selected, regions, exploreArea, probePoint, probeMode, onProbePoint, onSelectSite, onMoveSite, onMoveProjectCenter, onMoveExploreArea }: Props) {
   const viewport = useRef<HTMLDivElement>(null);
@@ -60,6 +61,13 @@ export default function LunarMap({ projects, hiddenProjectIds, selected, regions
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [hintDismissed, setHintDismissed] = useState(() => {
+    try {
+      return localStorage.getItem(MAP_HINT_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
   const side = Math.min(dimensions.width, dimensions.height);
   const regionPositions = new Map(regionMarkers.map(marker => [marker.id, marker]));
 
@@ -72,6 +80,15 @@ export default function LunarMap({ projects, hiddenProjectIds, selected, regions
   const projectSites = visibleProjects.flatMap(project => project.sites.map(site => ({
     target: { projectId: project.id, siteId: site.id }, site, color: project.color,
   })));
+
+  function dismissHint() {
+    setHintDismissed(true);
+    try {
+      localStorage.setItem(MAP_HINT_KEY, "1");
+    } catch {
+      return;
+    }
+  }
 
   useEffect(() => {
     let active = true;
@@ -507,10 +524,10 @@ export default function LunarMap({ projects, hiddenProjectIds, selected, regions
         )}
       </div>
 
-      <div className="pointer-events-none absolute left-2 top-3 z-20 bg-[#242424]/95 px-2 py-2 text-[10px] sm:left-3 sm:px-3 sm:text-[11px]">
-        LUNAR SOUTH POLE <span className="ml-1 text-[#aaa]">80°S–90°S</span>
+      <div className="pointer-events-none absolute left-2 top-2 z-20 bg-[#242424]/95 px-2 py-2 text-[10px] sm:left-3 sm:top-3 sm:px-3 sm:text-[11px]">
+        <span className="sm:hidden">SOUTH POLE</span><span className="hidden sm:inline">LUNAR SOUTH POLE <span className="ml-1 text-[#aaa]">80°S–90°S</span></span>
       </div>
-      <div className="absolute right-2 top-12 z-20 flex gap-0.5 bg-[#242424]/95 p-1 sm:right-3 sm:top-3 sm:gap-1">
+      <div className="absolute right-2 top-2 z-20 flex gap-0.5 bg-[#242424]/95 p-1 sm:right-3 sm:top-3 sm:gap-1">
         <button className={`flex h-8 items-center gap-1 px-2 text-xs ${shadows ? "bg-[#444] text-accent" : "text-[#aaa]"}`}
           type="button" aria-label="Toggle permanent shadows" aria-pressed={shadows}
           onClick={() => setShadows(!shadows)}><Layers size={15} /> PSR</button>
@@ -519,23 +536,21 @@ export default function LunarMap({ projects, hiddenProjectIds, selected, regions
         <button type="button" title="Reset view" aria-label="Reset view" className="p-2 hover:bg-[#444]" onClick={reset}><LocateFixed size={15} /></button>
       </div>
       {shadows && (
-        <div className="pointer-events-none absolute left-3 top-14 z-20 bg-[#242424]/95 px-3 py-2 text-[11px] max-sm:top-24">
+        <div className="pointer-events-none absolute left-2 top-12 z-20 bg-[#242424]/95 px-2 py-1 text-[10px] sm:left-3 sm:top-14 sm:px-3 sm:py-2 sm:text-[11px]">
           <span className="mr-2 inline-block h-2 w-2 bg-accent" />Permanently shadowed regions
         </div>
       )}
-      <div className="pointer-events-none absolute bottom-3 left-3 z-20 bg-[#242424]/95 p-2 font-mono text-[11px]">
-        {exploreArea ? <span>Click terrain or drag the white circle to move the search area</span> : point ? <><div>LAT {point.latitude.toFixed(5)}°</div><div>LON {point.longitude.toFixed(5)}°</div></> :
-          <span className="text-[#aaa]">{selected?.siteId ? "Click terrain to move selected site" : "Select a site to place it"}</span>}
-      </div>
-      <div className="pointer-events-none absolute bottom-3 right-3 z-20 bg-[#242424]/95 px-2 py-1 text-[10px] text-[#aaa]">
+      {!hintDismissed && <div className="pointer-events-none absolute bottom-2 left-2 right-2 z-20 flex max-w-full items-center gap-2 bg-[#242424]/95 p-2 font-mono text-[10px] sm:bottom-3 sm:left-3 sm:right-auto sm:text-[11px]">
+        <div className="min-w-0 flex-1 truncate">
+          {probeMode ? <span>Tap terrain to inspect a point</span> : exploreArea ? <span>Tap terrain or drag the white circle to move the search area</span> : point ? <><div>LAT {point.latitude.toFixed(5)}°</div><div>LON {point.longitude.toFixed(5)}°</div></> :
+            <span className="text-[#aaa]">{selected?.siteId ? "Click terrain to move selected site" : "Select a site to place it"}</span>}
+        </div>
+        <button type="button" onClick={dismissHint} aria-label="Dismiss map hint permanently" title="Hide map hint in this browser"
+          className="pointer-events-auto shrink-0 p-1 text-[#aaa] hover:text-white"><X size={14} /></button>
+      </div>}
+      <div className="pointer-events-none absolute bottom-3 right-3 z-20 hidden bg-[#242424]/95 px-2 py-1 text-[10px] text-[#aaa] sm:block">
         {probeMode ? exploreArea ? "Click terrain to set search center" : "Click terrain to inspect a point" : saving ? "Saving..." : `${Math.round(zoom * 100)}% · LOLA`}
       </div>
-      {regions?.grid.length && regionMarkers.length && (regions.projectId === null || !hiddenProjectIds.includes(regions.projectId)) ? <div className="pointer-events-none absolute bottom-12 right-3 z-20 flex max-w-[calc(100%-24px)] flex-wrap items-center gap-x-1 bg-[#242424]/90 px-2 py-1 text-[10px] text-[#bbb]">
-        <span className="mr-1 inline-block h-2 w-2 bg-[#60ba7b]" />Green
-        <span className="ml-2 mr-1 inline-block h-2 w-2 bg-[#ff9900]" />Yellow
-        <span className="ml-2 mr-1 inline-block h-2 w-2 bg-[#da0004]" />Red
-        <span className="ml-2 mr-1 inline-block h-2 w-2 bg-[#899199]" />No DEM
-      </div> : null}
       {error && info && <div className="pointer-events-none absolute bottom-14 left-3 z-20 bg-[#292929] px-3 py-2 text-xs text-[#ef9292]">{error}</div>}
     </div>
   );

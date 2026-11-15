@@ -196,14 +196,14 @@ export default function ExploreSearch({ area, onAreaChange, onRegions, onCreateP
     } finally { setSaving(false); }
   }
 
-  const input = "mt-2 block h-10 w-full min-w-0 border border-[#596168] bg-[#202326] px-3 text-sm font-normal text-white outline-none transition-colors hover:border-[#89939a] focus:border-accent [color-scheme:dark]";
-  const label = "block min-w-0 text-xs font-medium text-[#b6bdc0]";
-  return <div className="orbis-explore mx-auto max-w-3xl space-y-4 pb-6 text-sm leading-relaxed">
-    <div className="border-b border-[#454b50] pb-4"><h2 className="text-lg font-semibold tracking-tight text-white">Explore</h2>
-      <p className="mt-1 text-sm text-[#aeb6ba]">Find candidate areas before creating a project.</p></div>
-    <section className="orbis-panel space-y-4 p-4 sm:p-5">
-      <h3 className="text-sm font-semibold text-white">Search area</h3>
-      <p className="text-xs text-[#aeb6ba]">Click the map or drag the white circle to move the area.</p>
+  const input = "mt-1 block h-9 w-full min-w-0 border border-[#555] bg-[#292929] px-2 text-xs font-normal text-white outline-none focus:border-accent [color-scheme:dark]";
+  const label = "block min-w-0 text-xs text-[#aaa]";
+  return <div className="orbis-explore mx-auto max-w-[1200px] space-y-3 pb-3 text-xs leading-relaxed">
+    <div className="border-b border-[#444] pb-2"><h2 className="text-sm font-medium text-white">Explore</h2>
+      <p className="mt-1 text-[#aaa]">Find candidate areas before creating a project.</p></div>
+    <section className="orbis-panel space-y-3 p-3">
+      <h3 className="font-medium text-white">Search area</h3>
+      <p className="text-[#aaa]">Click the map or drag the white circle to move the area.</p>
       <div className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2">
         <label className={label}>Latitude
           <input className={input} type="text" inputMode="decimal" value={center.latitude}
@@ -216,7 +216,7 @@ export default function ExploreSearch({ area, onAreaChange, onRegions, onCreateP
         <input className={input} type="text" inputMode="decimal" value={center.radius}
           onChange={event => { setCenter(old => ({ ...old, radius: event.target.value })); invalidate(); }} onBlur={commitCenter} /></label>
     </section>
-    <section className="orbis-panel space-y-4 p-4 sm:p-5"><h3 className="text-sm font-semibold text-white">Mission timing</h3>
+    <section className="orbis-panel space-y-3 p-3"><h3 className="font-medium text-white">Mission timing</h3>
       <div className="grid grid-cols-1 gap-3 min-[440px]:grid-cols-2">
         <label className={label}>Arrival <span className="font-normal text-[#929ca1]">· UTC</span>
           <input className={input} type="datetime-local" value={arrival} onChange={event => setArrival(event.target.value)} /></label>
@@ -224,24 +224,24 @@ export default function ExploreSearch({ area, onAreaChange, onRegions, onCreateP
           <input className={input} type="number" min={1} max={8760} value={duration} onChange={event => setDuration(event.target.value)} /></label>
       </div>
     </section>
-    <section className="orbis-panel space-y-4 p-4 sm:p-5">
-      <h3 className="text-sm font-semibold text-white">Filters</h3>
-      <p className="text-xs text-[#aeb6ba]">Set both outage limits. Add contact and area requirements if needed.</p>
+    <section className="orbis-panel space-y-3 p-3">
+      <h3 className="font-medium text-white">Filters</h3>
+      <p className="text-[#aaa]">Set both outage limits. Add contact and area requirements if needed.</p>
       <div className="grid grid-cols-1 gap-4 min-[440px]:grid-cols-2">
-        <label className="text-[#b6bdc0]">Longest darkness <span className="text-[#929ca1]">· h</span>
+        <label className={label}>Longest darkness <span className="text-[#999]">· h</span>
           <input className={input} type="number" min={0} max={8760} step="any" required placeholder="Hours" value={sunLimit} onChange={event => setSunLimit(event.target.value)} /></label>
-        <label className="text-[#b6bdc0]">Longest Earth outage <span className="text-[#929ca1]">· h</span>
+        <label className={label}>Longest Earth outage <span className="text-[#999]">· h</span>
           <input className={input} type="number" min={0} max={8760} step="any" required placeholder="Hours" value={earthLimit} onChange={event => setEarthLimit(event.target.value)} /></label>
-        <label className="text-[#b6bdc0]">Earth contact / day <span className="text-[#929ca1]">· h, optional</span>
+        <label className={label}>Earth contact / day <span className="text-[#999]">· h, optional</span>
           <input className={input} type="number" min={0} max={24} step="0.5" placeholder="No minimum" value={dailyEarth} onChange={event => setDailyEarth(event.target.value)} /></label>
-        <label className="text-[#b6bdc0]">Minimum candidate area <span className="text-[#929ca1]">· km², optional</span>
+        <label className={label}>Minimum candidate area <span className="text-[#999]">· km², optional</span>
           <input className={input} type="number" min={0.001} max={1000} step="any" placeholder="Auto" value={minArea} onChange={event => setMinArea(event.target.value)} /></label>
       </div>
     </section>
     <button type="button" disabled={running} onClick={() => void search()}
-      className="min-h-11 w-full bg-accent px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#079bc9] disabled:cursor-wait disabled:opacity-50">{running ? progress || "Calculating…" : "Search candidate areas"}</button>
+      className="min-h-10 w-full bg-accent px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-[#079bc9] disabled:cursor-wait disabled:opacity-50">{running ? progress || "Calculating…" : "Search candidate areas"}</button>
     {error && <p role="alert" className="text-[#ef9292]">{error}</p>}
-    {result && <section className="space-y-2 border-t border-[#4a5054] pt-3">
+    {result && <section className="space-y-2 border-t border-[#444] pt-3">
       <div className="flex flex-wrap items-end justify-between gap-2"><h3 className="font-medium text-white">Candidate areas</h3>
         <span className="text-[11px] text-[#aeb6ba]">{result.evaluated_cells} sampled cells · {result.grid_spacing_m} m grid</span></div>
       <p className="text-[11px] text-[#aeb6ba]">{result.color_mode === "mission_needs" ? "Green meets entered limits; yellow is close; red misses them." : "Green ≥70%, yellow ≥35%, red <35% by weighted visibility."} Gray has no DEM. Colors describe visibility, not landing safety.</p>
@@ -250,23 +250,23 @@ export default function ExploreSearch({ area, onAreaChange, onRegions, onCreateP
       {result.regions.length > 0 && <label className="block text-[#b6bdc0]">Project name
         <input className={input} maxLength={100} value={name} placeholder="Name a saved candidate" onChange={event => setName(event.target.value)} /></label>}
       {result.regions.map((candidate, index) => <div key={`${candidate.center_latitude}-${candidate.center_longitude}`}
-        className="border border-[#484e52] border-l-[3px] bg-[#303438] p-4" style={{ borderLeftColor: tone[candidate.band] }}>
+        className="border border-[#555] border-l-[3px] bg-[#303030] p-3" style={{ borderLeftColor: tone[candidate.band] }}>
         <div className="flex flex-wrap items-start justify-between gap-2"><span className="font-medium text-white">{String(index + 1).padStart(2, "0")} · ~{candidate.area_km2} km²</span>
           <span className="font-mono text-[#d5dbde]">{candidate.meeting_percent === null ? `${candidate.robust_score}% rank` : `${candidate.meeting_percent}% meets needs`}</span></div>
         <p className="mt-1 text-[#aeb6ba]">{candidate.center_latitude.toFixed(4)}°, {candidate.center_longitude.toFixed(4)}° · Sun {candidate.sun_percent}% · Earth {candidate.earth_percent}%</p>
         <p className="text-[#aeb6ba]">Dark gap avg {candidate.average_no_sun_hours}h, worst {candidate.longest_no_sun_hours}h · Earth gap avg {candidate.average_no_earth_hours}h, worst {candidate.longest_no_earth_hours}h</p>
         <button type="button" disabled={saving} onClick={() => void save(candidate)}
-          className="mt-2 min-h-9 border border-[#69737a] px-2.5 text-white hover:bg-[#444b4f] disabled:opacity-50">Create project + candidate site</button>
+          className="mt-2 min-h-9 border border-[#666] px-2.5 text-white hover:bg-[#444] disabled:opacity-50">Create project + candidate site</button>
       </div>)}
       {result.regions.length > 0 && !result.regions.some(candidate => candidate.band === "green") && <div className="space-y-2 pt-2">
         <p className="text-[#bbc3c7]">No green patch for this arrival. Compare three later dates in the same region.</p>
         <button type="button" disabled={running} onClick={() => void compareDates()}
-          className="min-h-9 border border-[#69737a] px-3 text-white hover:bg-[#3c4347] disabled:opacity-50">Compare +7, +14, +21 days</button>
+          className="min-h-9 border border-[#666] px-3 text-white hover:bg-[#444] disabled:opacity-50">Compare +7, +14, +21 days</button>
       </div>}
       {suggestions.length > 0 && <div className="space-y-1 border-t border-[#484e52] pt-2"><p className="text-[#bcc4c7]">Sampled later dates · ranked by best patch</p>
         {suggestions.map(item => <button type="button" key={item.arrival}
           onClick={() => { setArrival(item.arrival.slice(0, 16)); setSuggestions([]); }}
-          className="flex w-full justify-between gap-2 bg-[#303438] px-2.5 py-2 text-left hover:bg-[#3b4246]">
+          className="flex w-full justify-between gap-2 bg-[#303030] px-2.5 py-2 text-left hover:bg-[#444]">
           <span>{item.arrival.slice(0, 16).replace("T", " ")} UTC</span><span>{item.meeting === null ? `${item.score}% visibility rank` : `${item.meeting}% meets limits`}</span>
         </button>)}
         <p className="text-[10px] text-[#9ba4a9]">Selecting a date fills the form. Search again to inspect its full map.</p>

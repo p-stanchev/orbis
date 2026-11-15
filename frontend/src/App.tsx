@@ -798,6 +798,37 @@ function App() {
     </>
   );
 
+  const mapView = <LunarMap
+    projects={projects}
+    hiddenProjectIds={hiddenProjects}
+    selected={selected}
+    regions={workspace === "explore" ? regions?.projectId === null ? regions : null : regions?.projectId ? regions : null}
+    exploreArea={workspace === "explore" ? exploreArea : null}
+    probePoint={workspace === "explore" ? null : probePoint}
+    probeMode={probeMode}
+    onProbePoint={point => {
+      if (workspace === "explore") {
+        setExploreArea(current => ({ ...current, ...point }));
+        setRegions(null);
+      } else setProbePoint(point);
+      setProbeMode(false);
+    }}
+    onMoveProjectCenter={async (projectId, lat, lon) => {
+      await saveMissionSettings(projectId, { center_latitude: lat, center_longitude: lon });
+    }}
+    onMoveExploreArea={(latitude, longitude) => {
+      setExploreArea(current => ({ ...current, latitude, longitude }));
+      setRegions(null);
+      setProbeMode(false);
+    }}
+    onSelectSite={target => {
+      setSelected(target);
+      setProbePoint(null);
+      setDrawer(null);
+    }}
+    onMoveSite={moveLandingSite}
+  />;
+
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-[#3d3d3d] text-[#eee]">
       <header className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-[#505050] bg-[#242424] px-2">
@@ -894,64 +925,37 @@ function App() {
             </button>
           </div>
           <SplitWorkspace
-            active={workspace === "explore" || (workspace !== "map" && !!currentProject)}
-            primary={
-              <LunarMap
-                projects={projects}
-                hiddenProjectIds={hiddenProjects}
-                selected={selected}
-                regions={workspace === "explore" ? regions?.projectId === null ? regions : null : regions?.projectId ? regions : null}
-                exploreArea={workspace === "explore" ? exploreArea : null}
-                probePoint={workspace === "explore" ? null : probePoint}
-                probeMode={probeMode}
-                onProbePoint={point => {
-                  if (workspace === "explore") {
-                    setExploreArea(current => ({ ...current, ...point }));
-                    setRegions(null);
-                  } else setProbePoint(point);
-                  setProbeMode(false);
-                }}
-                onMoveProjectCenter={async (projectId, lat, lon) => {
-                  await saveMissionSettings(projectId, { center_latitude: lat, center_longitude: lon });
-                }}
-                onMoveExploreArea={(latitude, longitude) => {
-                  setExploreArea(current => ({ ...current, latitude, longitude }));
-                  setRegions(null);
-                  setProbeMode(false);
-                }}
-                onSelectSite={(target) => {
-                  setSelected(target);
-                  setProbePoint(null);
-                  setDrawer(null);
-                }}
-                onMoveSite={moveLandingSite}
-              />
-            }
-            secondary={workspace === "explore" ? (
-              <div className="orbis-scroll h-full overflow-y-auto overscroll-contain bg-[#25282a] p-4 sm:p-5">
+            key={workspace === "statistics" ? "statistics" : "explore"}
+            splitId={workspace === "statistics" ? "statistics" : "explore"}
+            active={workspace === "explore" || workspace === "statistics"}
+            primary={workspace === "analysis" && canAnalyze && currentProject ? (
+              <MissionAnalysis key={`${currentProject.id}-${currentSite?.id ?? "center"}`}
+                latitude={probePoint?.latitude ?? currentSite!.latitude}
+                longitude={probePoint?.longitude ?? currentSite!.longitude}
+                arrivalUtc={currentProject.arrival_utc} durationHours={currentProject.duration_hours}
+                siteName={probePoint ? "Inspected point" : currentSite!.name} map={mapView} />
+            ) : mapView}
+            secondary={workspace === "statistics" && currentProject ? (
+              <div className="orbis-scroll h-full overflow-y-auto overscroll-contain bg-[#252525] p-2.5 sm:p-3">
+                <VisibilityStatistics key={currentProject.id}
+                  latitude={currentSite?.latitude ?? currentProject.center_latitude}
+                  longitude={currentSite?.longitude ?? currentProject.center_longitude}
+                  arrivalUtc={currentProject.arrival_utc} durationHours={currentProject.duration_hours}
+                  project={currentProject} probePoint={probePoint}
+                  onSelectSite={siteId => { setSelected({ projectId: currentProject.id, siteId }); setProbePoint(null); }}
+                  onProbePoint={point => { setProbePoint(point); setProbeMode(false); }}
+                  onProbeMode={enabled => { setWorkspace("map"); setProbeMode(enabled); }}
+                  onSaveMission={changes => saveMissionSettings(currentProject.id, changes)}
+                  onRegions={(projectId, areas, grid, spacing) => setRegions({ projectId, areas, grid, spacing })} />
+              </div>
+            ) :
+              <div className="orbis-scroll h-full overflow-y-auto overscroll-contain bg-[#252525] p-2.5 sm:p-3">
                 <ExploreSearch area={exploreArea}
                   onAreaChange={area => { setExploreArea(area); setRegions(null); }}
                   onRegions={(areas, grid, spacing) => setRegions({ projectId: null, areas, grid, spacing })}
                   onCreateProject={createFromExplore} />
               </div>
-            ) : currentProject && workspace === "statistics" ? (
-              <div className="orbis-scroll h-full overflow-y-auto overscroll-contain bg-[#252525] p-2.5 sm:p-3">
-                <VisibilityStatistics key={`${currentProject.id}-${currentSite?.id ?? "center"}`}
-                  latitude={currentSite?.latitude ?? currentProject.center_latitude}
-                  longitude={currentSite?.longitude ?? currentProject.center_longitude}
-                  arrivalUtc={currentProject.arrival_utc} durationHours={currentProject.duration_hours}
-                  project={currentProject} probePoint={probePoint}
-                  onProbePoint={point => { setProbePoint(point); setProbeMode(false); }} onProbeMode={setProbeMode}
-                  onSaveMission={changes => saveMissionSettings(currentProject.id, changes)}
-                  onRegions={(projectId, areas, grid, spacing) => setRegions({ projectId, areas, grid, spacing })} />
-              </div>
-            ) : canAnalyze && currentProject ? (
-              <MissionAnalysis key={`${currentProject.id}-${currentSite?.id ?? "center"}`}
-                latitude={probePoint?.latitude ?? currentSite!.latitude}
-                longitude={probePoint?.longitude ?? currentSite!.longitude}
-                arrivalUtc={currentProject.arrival_utc} durationHours={currentProject.duration_hours}
-                siteName={probePoint ? "Inspected point" : currentSite!.name} />
-            ) : null}
+            }
           />
         </main>
         <aside className={`relative min-h-0 flex-col border-l border-[#505050] bg-[#303336] ${inspectorOpen ? "hidden lg:flex" : "hidden"}`}>
