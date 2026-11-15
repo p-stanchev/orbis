@@ -344,7 +344,7 @@ export default function TerrainScene({
     materials.push(glowMaterial);
 
     const sunLabel = textSprite("SUN", "#ffb330", 0.8);
-    const earthLabel = textSprite("EARTH", "#64cdf1", 0.8);
+    const earthLabel = textSprite("EARTH", "#03ace4", 0.8);
     sky.add(sunLabel.sprite, earthLabel.sprite);
     materials.push(sunLabel.material, earthLabel.material);
     textures.push(sunLabel.texture, earthLabel.texture);

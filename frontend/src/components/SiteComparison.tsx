@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { ChevronRight } from "lucide-react";
 
 type Site = { id: string; name: string; latitude: number; longitude: number };
 type Body = { visible_percent: number; longest_hidden_hours: number };
@@ -75,8 +76,8 @@ export default function SiteComparison({ sites, arrivalUtc, durationHours, onSel
   const bestEarthGap = Math.min(...rows.map(row => row.result?.earth.longest_hidden_hours ?? Infinity));
 
   return (
-    <details className="orbis-panel p-3">
-      <summary className="cursor-pointer text-sm font-medium text-white">Compare landing sites</summary>
+    <details className="group orbis-panel p-3">
+      <summary className="flex cursor-pointer list-none items-center gap-2 font-medium text-white [&::-webkit-details-marker]:hidden"><ChevronRight size={15} className="shrink-0 transition-transform group-open:rotate-90" />Compare landing sites</summary>
       <div className="mt-3 space-y-3">
         <p className="text-[#aaa]">Choose two to four sites in this project. Each uses the same arrival time and mission duration.</p>
         {sites.length < 2 ? <p className="text-[#aaa]">Add a second landing site to compare locations.</p> : <>
@@ -84,23 +85,23 @@ export default function SiteComparison({ sites, arrivalUtc, durationHours, onSel
             {sites.map(site => <label key={site.id} className="flex min-w-0 items-center gap-2 bg-[#343434] px-2 py-2 text-[#ddd]">
               <input type="checkbox" checked={selectedIds.includes(site.id)}
                 disabled={running || (!selectedIds.includes(site.id) && selectedIds.length >= 4)}
-                onChange={() => toggle(site.id)} className="accent-[#03ace4]" />
+              onChange={() => toggle(site.id)} className="accent-accent" />
               <span className="truncate">{site.name}</span>
             </label>)}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <button type="button" disabled={running || selectedIds.length < 2} onClick={() => void compare()}
-              className="min-h-9 bg-[#03ace4] px-3 py-1.5 text-white hover:bg-[#079bc9] disabled:cursor-not-allowed disabled:opacity-50">
+              className="min-h-9 bg-accent px-3 py-1.5 text-white transition-[filter] hover:brightness-90 disabled:cursor-not-allowed disabled:opacity-50">
               Compare {selectedIds.length} sites
             </button>
             {running && <span role="status" className="text-[#aaa]">Calculating {completed} of {selectedIds.length} sites...</span>}
           </div>
         </>}
         {rows.length > 0 && <div className="grid gap-2">
-          {rows.map(row => <div key={row.site.id} className="border-l-2 border-[#03ace4] bg-[#343434] p-2.5">
+          {rows.map(row => <div key={row.site.id} className="border-l-2 border-accent bg-[#343434] p-2.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="font-medium text-white">{row.site.name} <span className="font-normal text-[#aaa]">{row.site.latitude.toFixed(4)}°, {row.site.longitude.toFixed(4)}°</span></div>
-              <button type="button" onClick={() => onSelectSite(row.site.id)} className="text-[#66c9eb] hover:underline">Show on map</button>
+              <button type="button" onClick={() => onSelectSite(row.site.id)} className="text-accent hover:underline">Show on map</button>
             </div>
             {row.error ? <p className="mt-2 text-[#ef9292]">{row.error}</p> : row.result &&
               <div className="mt-2 grid gap-2 text-[#bbb] min-[480px]:grid-cols-2">

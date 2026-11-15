@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { Globe2, Sun, Play, Pause } from "lucide-react";
 import TerrainScene, { type CelestialBody, type Ephemeris, type TerrainPatch } from "./TerrainScene";
 import MoonSchematic, { type OrbitGeometry } from "./MoonSchematic";
@@ -11,6 +11,8 @@ type Props = {
   durationHours: number;
   siteName: string;
   map: ReactNode;
+  elapsedHours: number;
+  onElapsedChange: Dispatch<SetStateAction<number>>;
 };
 
 const fmt = (date: Date) => Number.isFinite(date.getTime())
@@ -23,8 +25,7 @@ const bodyStatus = (body: CelestialBody) => {
   return "Above terrain horizon";
 };
 
-export default function MissionAnalysis({ latitude, longitude, arrivalUtc, durationHours, siteName, map }: Props) {
-  const [elapsed, setElapsed] = useState(0);
+export default function MissionAnalysis({ latitude, longitude, arrivalUtc, durationHours, siteName, map, elapsedHours, onElapsedChange }: Props) {
   const [playing, setPlaying] = useState(false);
   const [result, setResult] = useState<Ephemeris | null>(null);
   const [terrain, setTerrain] = useState<TerrainPatch | null>(null);
@@ -38,9 +39,10 @@ export default function MissionAnalysis({ latitude, longitude, arrivalUtc, durat
   const [orbitError, setOrbitError] = useState("");
   const arrival = useMemo(() => new Date(arrivalUtc), [arrivalUtc]);
   const duration = Math.max(1, durationHours);
+  const elapsed = Math.min(duration, Math.max(0, elapsedHours));
   const viewTime = new Date(arrival.getTime() + elapsed * 3600_000);
 
-  useEffect(() => { setElapsed(0); setPlaying(false); }, [arrivalUtc, latitude, longitude]);
+  useEffect(() => { setPlaying(false); }, [arrivalUtc, latitude, longitude]);
 
   useEffect(() => {
     const query = window.matchMedia("(max-width: 767px)");
@@ -51,13 +53,13 @@ export default function MissionAnalysis({ latitude, longitude, arrivalUtc, durat
 
   useEffect(() => {
     if (!playing) return;
-    const id = window.setInterval(() => setElapsed(value => {
+    const id = window.setInterval(() => onElapsedChange(value => {
       const next = value + Math.max(0.25, duration / 200);
       if (next >= duration) { setPlaying(false); return duration; }
       return next;
     }), 800);
     return () => window.clearInterval(id);
-  }, [playing, duration]);
+  }, [playing, duration, onElapsedChange]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -140,7 +142,7 @@ export default function MissionAnalysis({ latitude, longitude, arrivalUtc, durat
           <div role="group" aria-label="Mission viewer" className="flex border border-[#555]">
             {(["3d", "2d"] as const).map(mode => <button key={mode} type="button" aria-pressed={viewerMode === mode}
               onClick={() => { setViewerMode(mode); setMobilePane("viewer"); }}
-              className={`min-h-8 px-3 text-[11px] ${viewerMode === mode ? "bg-[#03ace4] text-white" : "bg-[#30363d] text-[#bbb] hover:bg-[#46505a]"}`}>{mode === "3d" ? "3D terrain" : "2D view"}</button>)}
+              className={`min-h-8 px-3 text-[11px] ${viewerMode === mode ? "bg-accent text-white" : "bg-[#30363d] text-[#bbb] hover:bg-[#46505a]"}`}>{mode === "3d" ? "3D terrain" : "2D view"}</button>)}
           </div>
           {viewerMode === "3d" && <span className="hidden text-[10px] text-[#999] md:inline">{terrain?.resolution ? `LOLA ${terrain.resolution}` : "Local DEM"}{terrain ? ` · ${Math.round(terrain.coverage_fraction * 100)}% coverage` : ""}</span>}
         </div>
@@ -148,7 +150,7 @@ export default function MissionAnalysis({ latitude, longitude, arrivalUtc, durat
       {mobile && <div role="group" aria-label="Mobile mission view" className="grid shrink-0 grid-cols-2 border-b border-[#444]">
         {(["map", "viewer"] as const).map(pane => <button key={pane} type="button" aria-pressed={mobilePane === pane}
           onClick={() => setMobilePane(pane)}
-          className={`min-h-10 border-b-2 text-xs ${mobilePane === pane ? "border-[#03ace4] bg-[#303b40] text-white" : "border-transparent bg-[#252525] text-[#bbb]"}`}>
+          className={`min-h-10 border-b-2 text-xs ${mobilePane === pane ? "border-accent bg-[#303b40] text-white" : "border-transparent bg-[#252525] text-[#bbb]"}`}>
           {pane === "map" ? "Map" : viewerMode === "2d" ? "2D view" : "3D terrain"}
         </button>)}
       </div>}
@@ -161,12 +163,12 @@ export default function MissionAnalysis({ latitude, longitude, arrivalUtc, durat
           <span className="font-mono text-[#eee]">{fmt(viewTime)}</span>
         </div>
         <div className="flex items-center gap-2">
-          <button type="button" className="bg-[#383838] p-2 hover:bg-[#484848]" aria-label={playing ? "Pause timeline" : "Play timeline"} onClick={() => { if (elapsed >= duration) setElapsed(0); setPlaying(!playing); }}>
+          <button type="button" className="bg-[#383838] p-2 hover:bg-[#484848]" aria-label={playing ? "Pause timeline" : "Play timeline"} onClick={() => { if (elapsed >= duration) onElapsedChange(0); setPlaying(!playing); }}>
             {playing ? <Pause size={14} /> : <Play size={14} />}
           </button>
           <input type="range" min={0} max={duration} step={Math.max(0.25, duration / 1000)} value={elapsed}
-            onChange={event => { setPlaying(false); setElapsed(Number(event.target.value)); }}
-            aria-label="Time since mission arrival" className="min-w-0 flex-1 accent-[#03ace4]" />
+            onChange={event => { setPlaying(false); onElapsedChange(Number(event.target.value)); }}
+            aria-label="Time since mission arrival" className="min-w-0 flex-1 accent-accent" />
           <span className="w-14 text-right font-mono text-[#aaa]">{elapsed.toFixed(1)} h</span>
         </div>
         <div className="flex justify-between text-[10px] text-[#999]"><span>{fmt(arrival)}</span><span>+{duration}h</span></div>

@@ -39,6 +39,16 @@ input:focus-visible {
   border-color: #03ace4;
 }
 
+.orbis-numeric-input[type="number"] {
+  appearance: textfield;
+}
+
+.orbis-numeric-input::-webkit-inner-spin-button,
+.orbis-numeric-input::-webkit-outer-spin-button {
+  appearance: none;
+  margin: 0;
+}
+
 .orbis-panel {
   border: 1px solid #454b50;
   border-radius: 4px;
@@ -115,7 +125,7 @@ input:focus-visible {
 .orbis-drawer-left.orbis-drawer-out { animation: orbis-drawer-left-in 300ms ease-in reverse both; }
 .orbis-drawer-right.orbis-drawer-out { animation: orbis-drawer-right-in 300ms ease-in reverse both; }
 
-@container statistics (max-width: 359px) {
+@container statistics (max-width: 519px) {
   .orbis-result-grid {
     grid-template-columns: 1fr;
   }

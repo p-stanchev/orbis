@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
-import { Globe2, Sun } from "lucide-react";
+import { ArrowUpRight, ChevronRight, Globe2, Sun } from "lucide-react";
 import SiteComparison from "./SiteComparison";
+import VisibilityTimeline from "./VisibilityTimeline";
+import NumericInput from "./NumericInput";
 
 type Window = { start_utc: string; end_utc: string; hours: number };
 type BodyStats = {
@@ -59,7 +61,8 @@ type Region = { regions: SearchRegion[]; grid: SearchGridCell[]; sample_count: n
   surface_measured_cells?: number;
   color_mode: "mission_needs" | "relative_visibility"; model: string };
 type RegionJob = { id: string; status: "running" | "completed" | "failed"; progress: number; result: Region | null; error: string | null };
-type Props = { latitude: number; longitude: number; arrivalUtc: string; durationHours: number;
+type Props = { latitude: number; longitude: number; arrivalUtc: string; durationHours: number; siteName: string;
+  elapsedHours: number; onElapsedChange: (hours: number) => void;
   project: { id: string; center_latitude: number; center_longitude: number; radius_m: number;
     sites: { id: string; name: string; latitude: number; longitude: number }[] };
   probePoint: { latitude: number; longitude: number } | null;
@@ -89,23 +92,24 @@ function nextChangeHours(windows: Window[], start: string) {
 
 function Results({ label, stats, color }: { label: "Sun" | "Earth" | "Sun and Earth"; stats: BodyStats; color: string }) {
   return (
-    <section className="orbis-panel min-w-0 p-2">
+    <section className="orbis-panel min-w-0 p-3">
       <div className="flex min-w-0 items-center gap-2 text-sm font-medium" style={{ color }}>
         {label === "Sun" ? <Sun size={17} className="shrink-0" /> : <Globe2 size={17} className="shrink-0" />}
-        <span className="truncate">{label === "Sun and Earth" ? "Sun + Earth" : label}</span>
+        <span className="whitespace-nowrap">{label === "Sun and Earth" ? "Sun + Earth" : label}</span>
       </div>
-      <div className="mt-0.5 pl-[25px] text-[10px] text-[#aaa]">Terrain horizon</div>
-      <div className="mt-2 space-y-1">
-        <div className="flex items-center justify-between gap-1 bg-[#353535] px-1.5 py-1.5"><span className="text-[10px] text-[#aaa]">Visible</span><span className="whitespace-nowrap font-mono text-xs tabular-nums text-white">{stats.visible_percent.toFixed(1)}%</span></div>
-        <div className="flex items-center justify-between gap-1 bg-[#353535] px-1.5 py-1.5"><span className="text-[10px] text-[#aaa]">Hours</span><span className="whitespace-nowrap font-mono text-xs tabular-nums text-white">{stats.visible_hours.toFixed(1)}</span></div>
-        <div className="flex items-center justify-between gap-1 bg-[#353535] px-1.5 py-1.5"><span className="text-[10px] text-[#aaa]">Windows</span><span className="whitespace-nowrap font-mono text-xs tabular-nums text-white">{stats.window_count}</span></div>
+      <div className="mt-2 font-mono text-2xl leading-none tabular-nums text-white">{stats.visible_percent.toFixed(1)}%</div>
+      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[#43474a]" role="img" aria-label={`${stats.visible_percent.toFixed(1)}% of mission visible`}>
+        <div className="h-full rounded-full" style={{ width: `${Math.min(100, Math.max(0, stats.visible_percent))}%`, backgroundColor: color }} />
       </div>
-      <div className="mt-2 flex flex-wrap items-baseline justify-between gap-x-1 border-b border-[#444] pb-2 text-[#aaa]">
-        <span>Longest hidden</span><span className="whitespace-nowrap font-mono text-white">{stats.longest_hidden_hours.toFixed(1)} h</span>
+      <div className="mt-3 space-y-1 border-t border-[#444] pt-2 text-[11px] text-[#aaa]">
+        <div className="flex items-baseline justify-between gap-2"><span>Visible</span><span className="whitespace-nowrap font-mono tabular-nums text-white">{stats.visible_hours.toFixed(1)} h</span></div>
+        <div className="flex items-baseline justify-between gap-2"><span>Windows</span><span className="whitespace-nowrap font-mono tabular-nums text-white">{stats.window_count}</span></div>
+        <div className="flex items-baseline justify-between gap-2"><span>Longest hidden</span><span className="whitespace-nowrap font-mono tabular-nums text-white">{stats.longest_hidden_hours.toFixed(1)} h</span></div>
       </div>
-      <details className="pt-2">
-        <summary className="cursor-pointer text-[#ddd]">Visibility windows ({stats.window_count})</summary>
+      <details className="group mt-2 border-t border-[#444] pt-2">
+        <summary className="flex cursor-pointer list-none items-center gap-1.5 text-[#ddd] [&::-webkit-details-marker]:hidden"><ChevronRight size={13} className="shrink-0 transition-transform group-open:rotate-90" />Window times</summary>
         <div className="orbis-scroll mt-2 max-h-48 space-y-1 overflow-y-auto overscroll-contain">
+          {stats.window_count === 0 && <p className="text-[#aaa]">No visibility windows in this mission.</p>}
           {stats.windows.map((window, index) => (
             <div key={`${window.start_utc}-${index}`} className="border-l-2 bg-[#343434] px-2 py-1.5" style={{ borderColor: color }}>
               <div className="font-mono text-[11px] text-[#fff]">{formatDate(window.start_utc)}</div>
@@ -119,7 +123,7 @@ function Results({ label, stats, color }: { label: "Sun" | "Earth" | "Sun and Ea
   );
 }
 
-export default function VisibilityStatistics({ latitude, longitude, arrivalUtc, durationHours, project, probePoint,
+export default function VisibilityStatistics({ latitude, longitude, arrivalUtc, durationHours, siteName, elapsedHours, onElapsedChange, project, probePoint,
   onProbePoint, onProbeMode, onSelectSite, onSaveCandidate, onSaveMission, onRegions }: Props) {
   const [job, setJob] = useState<Job | null>(null);
   const [region, setRegion] = useState<RegionJob | null>(null);
@@ -298,9 +302,10 @@ export default function VisibilityStatistics({ latitude, longitude, arrivalUtc, 
     parameters.min_daily_earth_hours, parameters.min_area_km2, parameters.max_slope_deg,
     parameters.max_roughness_m, retry]);
 
-  return (
-    <div className="orbis-statistics mx-auto max-w-[1200px] space-y-3 pb-3 text-xs leading-relaxed">
-      <section className="orbis-panel space-y-3 p-3">
+  const editingPanels = <>
+    <details className="group orbis-panel p-3">
+      <summary className="flex cursor-pointer list-none items-center gap-2 font-medium text-white [&::-webkit-details-marker]:hidden"><ChevronRight size={15} className="shrink-0 transition-transform group-open:rotate-90" />Point analysis and mission planning</summary>
+      <div className="mt-3 space-y-3">
         <div className="font-medium text-white">Planning window · UTC</div>
         <div className="flex flex-wrap items-end gap-2">
           <label className="min-w-[170px] flex-1 text-[#aaa]">Start
@@ -308,23 +313,23 @@ export default function VisibilityStatistics({ latitude, longitude, arrivalUtc, 
               className="mt-1 w-full border border-[#555] bg-[#292929] p-2 text-white [color-scheme:dark]" />
           </label>
           <label className="w-28 text-[#aaa]">Hours
-            <input type="number" min={1} max={8760} step={1} value={planningHours}
-              onChange={event => setPlanningHours(event.target.value)}
+            <NumericInput min={1} max={8760} step={1} value={planningHours}
+              onValueChange={setPlanningHours}
               className="mt-1 w-full border border-[#555] bg-[#292929] p-2 text-white [color-scheme:dark]" />
           </label>
           <button type="button" disabled={planningBusy} onClick={() => void savePlanningWindow()}
-            className="min-h-10 bg-[#03ace4] px-3 py-2 text-white transition-colors hover:bg-[#079bc9] disabled:opacity-50">Apply time</button>
+            className="min-h-10 bg-accent px-3 py-2 text-white transition-[filter] hover:brightness-90 disabled:opacity-50">Apply time</button>
         </div>
         <div className="font-medium text-white">Point analysis</div>
         <p className="text-[#aaa]">A probe computes the chosen coordinate independently and does not move a landing site. Area averages can differ sharply from a nearby point.</p>
         <div className="flex flex-wrap items-end gap-2">
           <label className="min-w-28 flex-1 text-[#aaa]">Latitude
-            <input type="number" min={-90} max={-80} step="any" value={pointLat}
-              onChange={event => setPointLat(event.target.value)} className="mt-1 w-full border border-[#555] bg-[#292929] p-2 text-white" />
+            <NumericInput min={-90} max={-80} step="any" increment={0.0001} value={pointLat}
+              onValueChange={setPointLat} className="mt-1 w-full border border-[#555] bg-[#292929] p-2 text-white" />
           </label>
           <label className="min-w-28 flex-1 text-[#aaa]">Longitude
-            <input type="number" min={-180} max={180} step="any" value={pointLon}
-              onChange={event => setPointLon(event.target.value)} className="mt-1 w-full border border-[#555] bg-[#292929] p-2 text-white" />
+            <NumericInput min={-180} max={180} step="any" increment={0.0001} value={pointLon}
+              onValueChange={setPointLon} className="mt-1 w-full border border-[#555] bg-[#292929] p-2 text-white" />
           </label>
           <button type="button" onClick={analyzeCoordinates} className="min-h-10 border border-[#666] px-3 py-2 text-white transition-colors hover:bg-[#383838]">Analyze point</button>
           <button type="button" onClick={() => onProbeMode(true)} className="min-h-10 border border-[#666] px-3 py-2 text-white transition-colors hover:bg-[#383838]">Pick on map</button>
@@ -342,7 +347,7 @@ export default function VisibilityStatistics({ latitude, longitude, arrivalUtc, 
             {slope?.resolution_m === 80 && <div className="text-[11px] text-[#aaa]">Coarse terrain estimate; small hazards are unresolved.</div>}
           </div>
           <label className="w-32 text-[#aaa]">Planning limit (°)
-            <input type="number" min={0} max={90} step="any" value={slopeLimit} onChange={event => setSlopeLimit(event.target.value)}
+            <NumericInput min={0} max={90} step="any" increment={0.5} value={slopeLimit} onValueChange={setSlopeLimit}
               className="mt-1 w-full border border-[#555] bg-[#292929] p-2 text-white" />
           </label>
         </div>
@@ -354,15 +359,29 @@ export default function VisibilityStatistics({ latitude, longitude, arrivalUtc, 
               className="mt-1 w-full border border-[#555] bg-[#292929] p-2 text-white" />
           </label>
           <button type="button" disabled={candidateBusy} onClick={() => void saveCandidate()}
-            className="min-h-10 bg-[#03ace4] px-3 py-2 text-white transition-colors hover:bg-[#079bc9] disabled:opacity-50">
+            className="min-h-10 bg-accent px-3 py-2 text-white transition-[filter] hover:brightness-90 disabled:opacity-50">
             {candidateBusy ? "Saving…" : "Save as candidate site"}
           </button>
         </div>}
         {candidateError && <p role="alert" className="text-[#ef9292]">{candidateError}</p>}
         {planningError && <p role="alert" className="text-[#ef9292]">{planningError}</p>}
+      </div>
+    </details>
+    <SiteComparison key={`${project.id}-${arrivalUtc}-${durationHours}-${project.sites.map(site => `${site.id}:${site.latitude}:${site.longitude}`).join("|")}`}
+      sites={project.sites} arrivalUtc={arrivalUtc} durationHours={durationHours} onSelectSite={onSelectSite} />
+  </>;
+
+  return (
+    <div className="orbis-statistics mx-auto max-w-[1200px] space-y-3 pb-3 text-xs leading-relaxed">
+      <section className="orbis-panel flex flex-wrap items-start justify-between gap-2 p-3 sm:p-4">
+        <div className="min-w-0">
+          <h2 className="text-base font-semibold text-white">Mission Statistics</h2>
+          <p className="mt-1 break-words text-[11px] text-[#aeb8bd]">{probePoint ? "Inspected point" : siteName} · {analysisLatitude.toFixed(6)}°, {analysisLongitude.toFixed(6)}°</p>
+        </div>
+        <div className="rounded bg-[#363a3d] px-2.5 py-2 font-mono text-[11px] text-[#e3e8ea]">
+          {formatDate(arrivalUtc)} · {durationHours} h
+        </div>
       </section>
-      <SiteComparison key={`${project.id}-${arrivalUtc}-${durationHours}-${project.sites.map(site => `${site.id}:${site.latitude}:${site.longitude}`).join("|")}`}
-        sites={project.sites} arrivalUtc={arrivalUtc} durationHours={durationHours} onSelectSite={onSelectSite} />
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="font-medium text-white">Estimated visibility windows · {probePoint ? "inspected point" : "selected site / search center"}</div>
         <button type="button" disabled={job?.status === "running" || region?.status === "running"}
@@ -373,7 +392,7 @@ export default function VisibilityStatistics({ latitude, longitude, arrivalUtc, 
         {job?.status === "running" && <div className="text-[#aaa]">Calculating… {Math.round(job.progress * 100)}%</div>}
       </div>
       {job?.status === "running" && <div role="progressbar" aria-label="Visibility calculation" aria-valuenow={Math.round(job.progress * 100)} aria-valuemin={0} aria-valuemax={100} className="h-1 w-full bg-[#444]">
-        <div className="h-full bg-[#03ace4]" style={{ width: `${job.progress * 100}%` }} />
+        <div className="h-full bg-accent" style={{ width: `${job.progress * 100}%` }} />
       </div>}
       {(error || job?.status === "failed") && (
         <div role="alert" className="space-y-2 text-[#ef9292]">
@@ -382,21 +401,35 @@ export default function VisibilityStatistics({ latitude, longitude, arrivalUtc, 
         </div>
       )}
       {job?.result && <>
-        <section className="orbis-panel grid grid-cols-1 gap-2 p-3 min-[430px]:grid-cols-2 [&>div]:min-w-0 [&>div]:break-words">
-          <div><span className="text-[#aaa]">From</span><div className="text-white">{formatDate(job.result.start_utc)}</div></div>
-          <div><span className="text-[#aaa]">Until</span><div className="text-white">{formatDate(job.result.end_utc)}</div></div>
-          <div><span className="text-[#aaa]">Coordinate</span><div className="text-white">{analysisLatitude.toFixed(6)}°, {analysisLongitude.toFixed(6)}°</div></div>
-          <div><span className="text-[#aaa]">Sun and Earth together</span><div className="text-white">{job.result.both.visible_hours.toFixed(1)}h · {job.result.both.visible_percent.toFixed(1)}%</div></div>
-        </section>
+        <p className="text-[11px] text-[#aab5ba]">Terrain-aware visibility · any part of the Sun or Earth disk above the sampled horizon</p>
         <div className="orbis-result-grid">
           <Results label="Sun" stats={job.result.sun} color="#ff9900" />
           <Results label="Earth" stats={job.result.earth} color="#03ace4" />
           <Results label="Sun and Earth" stats={job.result.both} color="#60ba7b" />
         </div>
+        <VisibilityTimeline startUtc={job.result.start_utc} durationHours={durationHours}
+          elapsedHours={elapsedHours} onTimeChange={onElapsedChange}
+          sun={job.result.sun.windows} earth={job.result.earth.windows} both={job.result.both.windows} />
+        <section className="orbis-panel space-y-2 p-3">
+          <div className="font-medium text-white">Upcoming visibility changes <span className="font-normal text-[#aaa]">· UTC</span></div>
+          <div className="grid gap-2 text-[#aaa] sm:grid-cols-2">
+            <div>Next sunrise <span className="block font-mono text-white">{eventLabel(job.result.sun.windows, job.result.start_utc, "start_utc")}</span></div>
+            <div>Next Earthrise <span className="block font-mono text-white">{eventLabel(job.result.earth.windows, job.result.start_utc, "start_utc")}</span></div>
+          </div>
+          <details className="group text-[11px] text-[#aaa]"><summary className="flex cursor-pointer list-none items-center gap-1.5 [&::-webkit-details-marker]:hidden"><ChevronRight size={13} className="shrink-0 transition-transform group-open:rotate-90" />More transitions</summary>
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              <div>Next sunset <span className="block font-mono text-white">{eventLabel(job.result.sun.windows, job.result.start_utc, "end_utc")}</span></div>
+              <div>Next Earthset <span className="block font-mono text-white">{eventLabel(job.result.earth.windows, job.result.start_utc, "end_utc")}</span></div>
+              <div>Sun changes in <span className="block font-mono text-white">{nextChangeHours(job.result.sun.windows, job.result.start_utc)}</span></div>
+              <div>Earth changes in <span className="block font-mono text-white">{nextChangeHours(job.result.earth.windows, job.result.start_utc)}</span></div>
+            </div>
+          </details>
+        </section>
         {job.result.terrain_coverage_min_km !== undefined && job.result.terrain_coverage_min_km < 99 &&
           <p className="border-l-2 border-[#ff9900] bg-[#34302a] px-3 py-2 text-[#ddd]">Far terrain coverage is incomplete in at least one direction ({job.result.terrain_coverage_min_km} km). Visibility estimates may miss a distant obstruction.</p>}
-        {job.result.geometric_sun && job.result.geometric_earth && job.result.sun_full && job.result.earth_full && <section className="orbis-panel space-y-2 p-3">
-          <div className="font-medium text-white">Visibility basis</div>
+        {job.result.geometric_sun && job.result.geometric_earth && job.result.sun_full && job.result.earth_full && <details className="group orbis-panel space-y-2 p-3">
+          <summary className="flex cursor-pointer list-none items-center gap-2 font-medium text-white [&::-webkit-details-marker]:hidden"><ChevronRight size={15} className="shrink-0 transition-transform group-open:rotate-90" />Scientific details and assumptions</summary>
+          <div className="pt-2 text-[#aaa]">Visibility basis · ideal horizon ignores terrain; full disk requires the entire disk above terrain.</div>
           <div className="grid gap-2 text-[#aaa]" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,180px),1fr))" }}>
             <div>Sun, ideal horizon <span className="font-mono text-white">{job.result.geometric_sun.visible_percent.toFixed(1)}%</span></div>
             <div>Sun, full disk above terrain <span className="font-mono text-white">{job.result.sun_full.visible_percent.toFixed(1)}%</span></div>
@@ -404,83 +437,61 @@ export default function VisibilityStatistics({ latitude, longitude, arrivalUtc, 
             <div>Earth, full disk above terrain <span className="font-mono text-white">{job.result.earth_full.visible_percent.toFixed(1)}%</span></div>
           </div>
           <p className="text-[10px] text-[#aaa]">The cards count intervals when any part of the disk clears sampled terrain. An ideal horizon ignores terrain. Partial Sun visibility does not establish usable power; Earth line of sight does not establish a communications link.</p>
-        </section>}
-        <section className="orbis-panel space-y-2 p-3">
-          <div className="font-medium text-white">Transitions from arrival</div>
-          <div className="grid gap-1 text-[#aaa]" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,180px),1fr))" }}>
-            <div>Next sunrise <span className="block font-mono text-white">{eventLabel(job.result.sun.windows, job.result.start_utc, "start_utc")}</span></div>
-            <div>Next sunset <span className="block font-mono text-white">{eventLabel(job.result.sun.windows, job.result.start_utc, "end_utc")}</span></div>
-            <div>Next Earthrise <span className="block font-mono text-white">{eventLabel(job.result.earth.windows, job.result.start_utc, "start_utc")}</span></div>
-            <div>Next Earthset <span className="block font-mono text-white">{eventLabel(job.result.earth.windows, job.result.start_utc, "end_utc")}</span></div>
-          </div>
-          <div className="flex flex-wrap gap-x-4 gap-y-1 text-[#aaa]">
-            <span>Sun changes in <span className="font-mono text-white">{nextChangeHours(job.result.sun.windows, job.result.start_utc)}</span></span>
-            <span>Earth changes in <span className="font-mono text-white">{nextChangeHours(job.result.earth.windows, job.result.start_utc)}</span></span>
-          </div>
-          {job.result.solar_elevation_min_deg !== undefined && job.result.solar_elevation_max_deg !== undefined && <div className="text-[#aaa]">Sampled solar elevation <span className="font-mono text-white">{job.result.solar_elevation_min_deg.toFixed(2)}° to {job.result.solar_elevation_max_deg.toFixed(2)}°</span></div>}
-        </section>
-        <section className="orbis-panel space-y-2 p-3">
-          <div className="font-medium text-white">Mission timeline</div>
-          <div className="orbis-scroll max-h-64 overflow-y-auto overscroll-contain">
-            {job.result.timeline.map((entry, index) => (
-              <div key={`${entry.start_utc}-${index}`} className="grid gap-1 border-b border-[#444] py-1.5 min-[560px]:grid-cols-[1fr_auto] min-[560px]:gap-2">
-                <span>{formatDate(entry.start_utc)} → {formatDate(entry.end_utc)}</span>
-                <span className="font-mono min-[560px]:text-right">{entry.sun ? "Sun" : "No Sun"} · {entry.earth ? "Earth" : "No Earth"} · {entry.hours.toFixed(1)}h</span>
-              </div>
-            ))}
-          </div>
-        </section>
-        <details className="text-[#aaa]"><summary className="cursor-pointer">Calculation details</summary>
-          {job.result.model}. {job.result.terrain_coverage_min_km !== undefined && <>The 80 m DEM reaches at least {job.result.terrain_coverage_min_km} km in every sampled direction. The 5 m near field mosaic {job.result.near_5m_used ? "was used where covered" : "was unavailable at this point"}; its published grid includes interpolated pixels. </>}Azimuths are sampled every 2°, and terrain between rays or beyond coverage may be missed. Samples are {job.result.sample_step_minutes} minutes apart; transitions are refined within detected brackets. Panel orientation, battery energy, antenna and ground stations are not modeled.
-        </details>
+          {job.result.solar_elevation_min_deg !== undefined && job.result.solar_elevation_max_deg !== undefined &&
+            <p className="text-[10px] text-[#aaa]">Sampled solar elevation: {job.result.solar_elevation_min_deg.toFixed(2)}° to {job.result.solar_elevation_max_deg.toFixed(2)}°</p>}
+          <p className="text-[10px] text-[#aaa]">{job.result.model}. {job.result.terrain_coverage_min_km !== undefined && <>The 80 m DEM reaches at least {job.result.terrain_coverage_min_km} km in every sampled direction. The 5 m near field mosaic {job.result.near_5m_used ? "was used where covered" : "was unavailable at this point"}; its published grid includes interpolated pixels. </>}Azimuths are sampled every 2°, and terrain between rays or beyond coverage may be missed. Samples are {job.result.sample_step_minutes} minutes apart; transitions are refined within detected brackets. Panel orientation, battery energy, antenna and ground stations are not modeled.</p>
+        </details>}
       </>}
-      <section className="space-y-2 border-t border-[#484848] pt-3">
+      {editingPanels}
+      <details className="group orbis-panel p-3">
+        <summary className="flex cursor-pointer list-none items-center gap-2 font-medium text-white [&::-webkit-details-marker]:hidden"><ChevronRight size={15} className="shrink-0 transition-transform group-open:rotate-90" />Search this project's region · advanced</summary>
+      <section className="mt-3 space-y-2 border-t border-[#484848] pt-3">
         <div className="font-medium text-white">Search region <span className="text-[#888]">· {Math.round(project.radius_m / 1000 * 10) / 10} km</span></div>
         <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,150px),1fr))" }}>
           <label className="text-[#aaa]">Survive without Sun (h)
-            <input type="number" min={0} max={8760} step={1} placeholder="No limit"
+            <NumericInput min={0} max={8760} step={1} placeholder="No limit"
               value={controls.max_no_sun_hours ?? ""}
-              onChange={event => setControls(current => ({ ...current,
-                max_no_sun_hours: event.target.value === "" ? null : Math.max(0, Math.min(8760, Number(event.target.value))) }))}
+              onValueChange={value => setControls(current => ({ ...current,
+                max_no_sun_hours: value === "" ? null : Math.max(0, Math.min(8760, Number(value))) }))}
               className="mt-1 w-full border border-[#555] bg-[#292929] p-2 text-white [color-scheme:dark]" />
           </label>
           <label className="text-[#aaa]">Max Earth outage (h)
-            <input type="number" min={0} max={8760} step={1} placeholder="No limit"
+            <NumericInput min={0} max={8760} step={1} placeholder="No limit"
               value={controls.max_no_earth_hours ?? ""}
-              onChange={event => setControls(current => ({ ...current,
-                max_no_earth_hours: event.target.value === "" ? null : Math.max(0, Math.min(8760, Number(event.target.value))) }))}
+              onValueChange={value => setControls(current => ({ ...current,
+                max_no_earth_hours: value === "" ? null : Math.max(0, Math.min(8760, Number(value))) }))}
               className="mt-1 w-full border border-[#555] bg-[#292929] p-2 text-white [color-scheme:dark]" />
           </label>
           <label className="text-[#aaa]">Earth contact / day (h)
-            <input type="number" min={0} max={24} step={0.5} value={controls.min_daily_earth_hours}
-              onChange={event => setControls(current => ({ ...current,
-                min_daily_earth_hours: Math.max(0, Math.min(24, Number(event.target.value) || 0)) }))}
+            <NumericInput min={0} max={24} step={0.5} value={controls.min_daily_earth_hours}
+              onValueChange={value => setControls(current => ({ ...current,
+                min_daily_earth_hours: Math.max(0, Math.min(24, Number(value) || 0)) }))}
               className="mt-1 w-full border border-[#555] bg-[#292929] p-2 text-white [color-scheme:dark]" />
           </label>
           <label className="text-[#aaa]">Sun ranking priority (%)
-            <input type="number" min={0} max={100} step={5} value={controls.sun_weight}
-              onChange={event => setControls(current => ({ ...current,
-                sun_weight: Math.max(0, Math.min(100, Number(event.target.value) || 0)) }))}
+            <NumericInput min={0} max={100} step={5} value={controls.sun_weight}
+              onValueChange={value => setControls(current => ({ ...current,
+                sun_weight: Math.max(0, Math.min(100, Number(value) || 0)) }))}
               className="mt-1 w-full border border-[#555] bg-[#292929] p-2 text-white [color-scheme:dark]" />
           </label>
           <label className="text-[#aaa]">Minimum area (km²)
-            <input type="number" min={0.001} max={1000} step={0.1} value={controls.min_area_km2}
-              onChange={event => setControls(current => ({ ...current,
-                min_area_km2: Math.max(0.001, Math.min(1000, Number(event.target.value) || 0.001)) }))}
+            <NumericInput min={0.001} max={1000} step={0.1} value={controls.min_area_km2}
+              onValueChange={value => setControls(current => ({ ...current,
+                min_area_km2: Math.max(0.001, Math.min(1000, Number(value) || 0.001)) }))}
               className="mt-1 w-full border border-[#555] bg-[#292929] p-2 text-white [color-scheme:dark]" />
           </label>
           <label className="text-[#aaa]">Maximum local slope (°)
-            <input type="number" min={0} max={90} step={0.5} placeholder="No slope filter"
+            <NumericInput min={0} max={90} step={0.5} placeholder="No slope filter"
               value={controls.max_slope_deg ?? ""}
-              onChange={event => setControls(current => ({ ...current,
-                max_slope_deg: event.target.value === "" ? null : Math.max(0, Math.min(90, Number(event.target.value))) }))}
+              onValueChange={value => setControls(current => ({ ...current,
+                max_slope_deg: value === "" ? null : Math.max(0, Math.min(90, Number(value))) }))}
               className="mt-1 w-full border border-[#555] bg-[#292929] p-2 text-white [color-scheme:dark]" />
           </label>
           <label className="text-[#aaa]">Maximum roughness (m)
-            <input type="number" min={0} max={1000} step={0.1} placeholder="No roughness filter"
+            <NumericInput min={0} max={1000} step={0.1} placeholder="No roughness filter"
               value={controls.max_roughness_m ?? ""}
-              onChange={event => setControls(current => ({ ...current,
-                max_roughness_m: event.target.value === "" ? null : Math.max(0, Math.min(1000, Number(event.target.value))) }))}
+              onValueChange={value => setControls(current => ({ ...current,
+                max_roughness_m: value === "" ? null : Math.max(0, Math.min(1000, Number(value))) }))}
               className="mt-1 w-full border border-[#555] bg-[#292929] p-2 text-white [color-scheme:dark]" />
           </label>
         </div>
@@ -488,7 +499,7 @@ export default function VisibilityStatistics({ latitude, longitude, arrivalUtc, 
           <p className="text-[10px] text-[#aaa]">Blank terrain limits leave them out. Missing slope or roughness skips that filter for the cell and is marked unchecked.</p>
           <button type="button" disabled={region?.status === "running"}
             onClick={() => { setParameters(controls); setRetry(value => value + 1); }}
-            className="min-h-9 bg-[#03ace4] px-3 py-1.5 text-white hover:bg-[#079bc9] disabled:opacity-50">Search region</button>
+            className="min-h-9 bg-accent px-3 py-1.5 text-white transition-[filter] hover:brightness-90 disabled:opacity-50">Search region</button>
         </div>
         {region?.status === "running" && <p className="text-[#aaa]">Scanning areas… {Math.round(region.progress * 100)}%</p>}
         {(regionError || region?.status === "failed") && <p role="alert" className="text-[#ef9292]">{regionError || region?.error}</p>}
@@ -512,9 +523,9 @@ export default function VisibilityStatistics({ latitude, longitude, arrivalUtc, 
             <div key={`${area.center_latitude}-${area.center_longitude}`} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-sm border-l-2 bg-[#30343a] px-3 py-2"
               style={{ borderColor: area.band === "green" ? "#60ba7b" : area.band === "yellow" ? "#ff9900" : "#da0004" }}>
               <span className="min-w-0 flex-1 font-medium text-white">{String(index + 1).padStart(2, "0")} · {area.area_km2} km² <span className="font-normal text-[#aaa]">near {area.center_latitude.toFixed(4)}°, {area.center_longitude.toFixed(4)}°</span>
-                <button type="button" className="ml-2 font-normal text-[#66c9eb] hover:underline" onClick={() => onProbePoint({
+                <button type="button" className="ml-2 inline-flex items-center gap-1 font-normal text-accent hover:underline" onClick={() => onProbePoint({
                   latitude: area.representative_latitude, longitude: area.representative_longitude,
-                })}>Inspect point ↗</button>
+                })}>Inspect point <ArrowUpRight size={13} aria-hidden="true" /></button>
               </span>
               <span className="shrink-0 text-right font-mono text-[#ddd]">
                 {area.meeting_percent !== null && <span className="block font-medium">{area.meeting_percent}% of sampled area meets limits</span>}
@@ -527,11 +538,12 @@ export default function VisibilityStatistics({ latitude, longitude, arrivalUtc, 
               </span>
             </div>
           ))}</div>
-          <details className="text-[10px] text-[#aaa]"><summary className="cursor-pointer">How patches are ranked</summary>
+          <details className="group text-[10px] text-[#aaa]"><summary className="flex cursor-pointer list-none items-center gap-1.5 [&::-webkit-details-marker]:hidden"><ChevronRight size={12} className="shrink-0 transition-transform group-open:rotate-90" />How patches are ranked</summary>
             Area coverage is the fraction of sampled cells that meet every entered limit with data available. Green patches have at least 75% coverage, yellow at least 25%, red less. Individual map cells use the limits directly; yellow is within 20% of an entered outage or contact limit. Without limits, colors use weighted visibility. Slope and roughness above entered limits exclude a cell from patches; missing terrain data skips that filter and is shown in gray. Patches rank by coverage, terrain-filter data coverage, then the lower-quartile visibility score ({parameters.sun_weight}% Sun, {100 - parameters.sun_weight}% Earth). Roughness is the RMS of 80 m DEM heights around a fitted plane in a 400 m radius; elevation is shown for context and does not change rank. These are sampled estimates, not a guarantee for every point. Visibility does not model generated power or a radio link. The 80 m DEM and {region.result.grid_spacing_m} m grid can miss small features.
           </details>
         </>}
       </section>
+      </details>
       {!job && !error && <p className="text-[#aaa]">Starting visibility analysis…</p>}
     </div>
   );

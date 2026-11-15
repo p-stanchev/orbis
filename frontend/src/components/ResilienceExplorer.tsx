@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import NumericInput from "./NumericInput";
 
 type Site = { id: string; name: string; latitude: number; longitude: number };
 export type ResilienceProject = { id: string; name: string; arrival_utc: string; duration_hours: number;
@@ -224,7 +225,7 @@ export default function ResilienceExplorer({ projects, initialProjectId }: {
             {project?.sites.map(site => <option key={site.id} value={site.id}>{site.name}</option>)}
           </select></label>
           <label className={label}>Arrival · UTC<input className={input} type="datetime-local" value={baselineStart} onChange={event => setBaselineStart(event.target.value)} /></label>
-          <label className={label}>Duration · hours<input className={input} type="number" min={1} max={8760} step={1} value={baselineHours} onChange={event => setBaselineHours(event.target.value)} /></label>
+          <label className={label}>Duration · hours<NumericInput className={input} min={1} max={8760} step={1} value={baselineHours} onValueChange={setBaselineHours} /></label>
         </div>
       </section>
       <section className="orbis-panel space-y-3 p-3">
@@ -236,7 +237,7 @@ export default function ResilienceExplorer({ projects, initialProjectId }: {
         </div>
         <div className="grid gap-3 min-[540px]:grid-cols-2">
           <label className={label}>Scenario arrival · UTC<input className={input} type="datetime-local" value={scenarioStart} onChange={event => setScenarioStart(event.target.value)} /></label>
-          <label className={label}>Scenario duration · hours<input className={input} type="number" min={1} max={8760} step={1} value={scenarioHours} onChange={event => setScenarioHours(event.target.value)} /></label>
+          <label className={label}>Scenario duration · hours<NumericInput className={input} min={1} max={8760} step={1} value={scenarioHours} onValueChange={setScenarioHours} /></label>
           <label className={label}>Scenario location<select className={input} value={scenarioSiteId} onChange={event => setScenarioSiteId(event.target.value)}>
             <option value="center">Project center</option>
             {project?.sites.map(site => <option key={site.id} value={site.id}>{site.name}</option>)}
@@ -244,13 +245,13 @@ export default function ResilienceExplorer({ projects, initialProjectId }: {
           </select></label>
         </div>
         {scenarioSiteId === "custom" && <div className="grid gap-3 min-[540px]:grid-cols-2">
-          <label className={label}>Latitude<input className={input} type="number" min={-90} max={-80} step="any" value={customLat} onChange={event => setCustomLat(event.target.value)} /></label>
-          <label className={label}>Longitude<input className={input} type="number" min={-180} max={180} step="any" value={customLon} onChange={event => setCustomLon(event.target.value)} /></label>
+          <label className={label}>Latitude<NumericInput className={input} min={-90} max={-80} step="any" increment={0.0001} value={customLat} onValueChange={setCustomLat} /></label>
+          <label className={label}>Longitude<NumericInput className={input} min={-180} max={180} step="any" increment={0.0001} value={customLon} onValueChange={setCustomLon} /></label>
           <p className="text-[#aaa] min-[540px]:col-span-2">Nearby point must be within the {Math.round((project?.radius_m ?? 0) / 100) / 10} km project radius.</p>
         </div>}
       </section>
       <button type="button" disabled={running || alternativeBusy || !project} onClick={() => void compare()}
-        className="min-h-10 w-full bg-[#03ace4] px-3 py-2 font-medium text-white hover:bg-[#079bc9] disabled:opacity-50">
+        className="min-h-10 w-full bg-accent px-3 py-2 font-medium text-white transition-[filter] hover:brightness-90 disabled:opacity-50">
         {running ? `Comparing · baseline ${Math.round(progress.baseline * 100)}% · scenario ${Math.round(progress.scenario * 100)}%` : "Compare scenarios"}
       </button>
       {error && <p role="alert" className="text-[#ef9292]">{error}</p>}
@@ -277,7 +278,7 @@ export default function ResilienceExplorer({ projects, initialProjectId }: {
             })}</tbody>
           </table>
         </div>
-        <div className="border-l-2 border-[#03ace4] bg-[#33383a] px-3 py-2 text-[#ddd]">
+        <div className="border-l-2 border-accent bg-[#33383a] px-3 py-2 text-[#ddd]">
           <div>Sun visibility {sunDelta > 0.05 ? "rises" : sunDelta < -0.05 ? "falls" : "is nearly unchanged"}{Math.abs(sunDelta) > 0.05 ? ` by ${Math.abs(sunDelta).toFixed(1)} percentage points` : ""}. Potential Earth visibility {earthDelta > 0.05 ? "rises" : earthDelta < -0.05 ? "falls" : "is nearly unchanged"}{Math.abs(earthDelta) > 0.05 ? ` by ${Math.abs(earthDelta).toFixed(1)} percentage points` : ""}.</div>
           {sameWindow && result.baseline.name !== result.scenario.name && sunDelta > 0 && earthDelta > 0 &&
             <div className="mt-1">For this same mission window, the alternative location has higher sampled Sun and Earth visibility. Inspect its terrain and outage lengths before choosing it.</div>}
@@ -301,7 +302,7 @@ export default function ResilienceExplorer({ projects, initialProjectId }: {
             {alternatives.map((item, index) => <div key={item.site.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 bg-[#343434] px-2.5 py-2">
               <span className="min-w-0 flex-1 font-medium text-white">{index + 1}. {item.site.name}</span>
               <span className="font-mono text-[#ddd]">Earth gap {item.data.earth.longest_hidden_hours.toFixed(1)} h · darkness {item.data.sun.longest_hidden_hours.toFixed(1)} h</span>
-              <button type="button" onClick={() => setScenarioSiteId(item.site.id)} className="text-[#66c9eb] hover:underline">Use as scenario</button>
+              <button type="button" onClick={() => setScenarioSiteId(item.site.id)} className="text-accent hover:underline">Use as scenario</button>
             </div>)}
           </div>}
         </div>}

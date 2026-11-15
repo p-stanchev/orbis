@@ -13,6 +13,7 @@ type Bounds = { left: number; right: number; top: number; bottom: number };
 type Info = { bounds: Bounds; pole: { x: number; y: number }; radius: number };
 type Marker = { id: string; u: number; v: number };
 type Point = { latitude: number; longitude: number; u: number; v: number };
+type FocusRequest = { latitude: number; longitude: number; revision: number } | null;
 type Props = {
   landmarksEnabled: boolean;
   projects: Project[];
@@ -22,11 +23,14 @@ type Props = {
   regions: { projectId: string | null; areas: SearchRegion[]; grid: SearchGridCell[]; spacing: number } | null;
   exploreArea: { latitude: number; longitude: number; radius_m: number } | null;
   probePoint: { latitude: number; longitude: number } | null;
+  onOpenProbe: () => void;
+  focusRequest: FocusRequest;
   probeMode: boolean;
   onProbePoint: (point: { latitude: number; longitude: number }) => void;
   onSelectSite: (target: Target | null) => void;
   onMoveSite: (target: Target, latitude: number, longitude: number) => Promise<void>;
   onMoveProjectCenter: (projectId: string, latitude: number, longitude: number) => Promise<void>;
+  onResizeProject: (projectId: string, radius: number) => Promise<void>;
   onMoveExploreArea: (latitude: number, longitude: number) => void;
 };
 type Pointer = { x: number; y: number };
@@ -37,6 +41,9 @@ type Gesture = {
   pinch: boolean;
   distance: number;
   marker: Target | null;
+  markerOffset: Pointer;
+  radiusProjectId: string | null;
+  radiusStartDistance: number;
   explore: boolean;
   exploreOffset: Pointer;
 };
@@ -44,7 +51,7 @@ type Gesture = {
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const MAP_HINT_KEY = "orbis-map-hint-dismissed-v1";
 
-export default function LunarMap({ landmarksEnabled, projects, hiddenProjectIds, unlockedSiteIds, selected, regions, exploreArea, probePoint, probeMode, onProbePoint, onSelectSite, onMoveSite, onMoveProjectCenter, onMoveExploreArea }: Props) {
+export default function LunarMap({ landmarksEnabled, projects, hiddenProjectIds, unlockedSiteIds, selected, regions, exploreArea, probePoint, onOpenProbe, focusRequest, probeMode, onProbePoint, onSelectSite, onMoveSite, onMoveProjectCenter, onResizeProject, onMoveExploreArea }: Props) {
   const viewport = useRef<HTMLDivElement>(null);
   const map = useRef<HTMLDivElement>(null);
   const pointers = useRef(new Map<number, Pointer>());
@@ -60,6 +67,7 @@ export default function LunarMap({ landmarksEnabled, projects, hiddenProjectIds,
   const [probeMarker, setProbeMarker] = useState<Marker | null>(null);
   const [exploreMarker, setExploreMarker] = useState<Marker | null>(null);
   const [preview, setPreview] = useState<{ id: string; u: number; v: number } | null>(null);
+  const [radiusPreview, setRadiusPreview] = useState<{ id: string; radius: number } | null>(null);
   const [explorePreview, setExplorePreview] = useState<{ u: number; v: number } | null>(null);
   const [point, setPoint] = useState<Point | null>(null);
   const [shadows, setShadows] = useState(false);
@@ -87,13 +95,22 @@ export default function LunarMap({ landmarksEnabled, projects, hiddenProjectIds,
       return false;
     }
   });
-  const selectedLocked = !!selected?.siteId && !unlockedSiteIds.includes(selected.siteId);
+  const projectLocked = (projectId: string) =>
+    !!projects.find(project => project.id === projectId)?.sites.some(site => !unlockedSiteIds.includes(site.id));
+  const selectedLocked = !!selected && (selected.siteId
+    ? !unlockedSiteIds.includes(selected.siteId) : projectLocked(selected.projectId));
   const side = Math.min(dimensions.width, dimensions.height) * 0.9;
   const regionPositions = new Map(regionMarkers.map(marker => [marker.id, marker]));
   const candidateAreasVisible = !!regions?.grid.length && (regions.projectId === null || !hiddenProjectIds.includes(regions.projectId));
   const landmarkPositions = new Map(landmarkMarkers.map(marker => [marker.id, marker]));
   const activeLandmarkIndex = landmarks.findIndex(landmark => landmark.id === activeLandmarkId);
   const activeLandmark = activeLandmarkIndex >= 0 ? landmarks[activeLandmarkIndex] : null;
+  const focusTarget = (probePoint && probeMarker)
+    || (landmarksEnabled && landmarkCardOpen && activeLandmark && landmarkPositions.get(activeLandmark.id))
+    || (exploreArea && exploreMarker)
+    || (selected && !hiddenProjectIds.includes(selected.projectId)
+      && markers.find(marker => marker.id === (selected.siteId ?? `center:${selected.projectId}`)))
+    || null;
 
   useEffect(() => {
     if (!landmarksEnabled) {
@@ -217,6 +234,21 @@ export default function LunarMap({ landmarksEnabled, projects, hiddenProjectIds,
   }, [probePoint?.latitude, probePoint?.longitude]);
 
   useEffect(() => {
+    if (!focusRequest || !info || !dimensions.width || !dimensions.height) return;
+    const controller = new AbortController();
+    fetch("/api/terrain/project", {
+      method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
+      body: JSON.stringify([{ id: "focus", latitude: focusRequest.latitude, longitude: focusRequest.longitude }]),
+    }).then(response => { if (!response.ok) throw new Error(); return response.json() as Promise<Marker[]>; })
+      .then(result => {
+        if (controller.signal.aborted || !result[0]) return;
+        focusMarker(result[0], Math.max(zoom, 3));
+      })
+      .catch(() => { if (!controller.signal.aborted) setError("Could not center this location."); });
+    return () => controller.abort();
+  }, [focusRequest?.revision, info, dimensions.width, dimensions.height]);
+
+  useEffect(() => {
     const controller = new AbortController();
     if (!exploreArea) { setExploreMarker(null); return () => controller.abort(); }
     fetch("/api/terrain/project", {
@@ -243,7 +275,17 @@ export default function LunarMap({ landmarksEnabled, projects, hiddenProjectIds,
     setOffset(current => limitedOffset(current, next));
   }
 
-  function reset() { setSmoothFocus(false); setZoom(1); setOffset({ x: 0, y: 0 }); }
+  function focusMarker(marker: Marker, nextZoom: number) {
+    setSmoothFocus(true);
+    setZoom(nextZoom);
+    setOffset(limitedOffset({ x: (0.5 - marker.u) * side * nextZoom,
+      y: (0.5 - marker.v) * side * nextZoom }, nextZoom));
+  }
+
+  function zoomToSelection() {
+    if (!focusTarget) return;
+    focusMarker(focusTarget, clamp(Math.max(zoom * 1.5, 3), 1, 10));
+  }
 
   function normalizedPoint(clientX: number, clientY: number) {
     if (!map.current || !info) return null;
@@ -295,6 +337,53 @@ export default function LunarMap({ landmarksEnabled, projects, hiddenProjectIds,
     return { x: info.bounds.left + u * width, y: info.bounds.top - v * height, u, v };
   }
 
+  function withinProjectSites(position: ReturnType<typeof constrainedPoint>, target: Target | null) {
+    if (!position || !target || target.siteId || !info) return position;
+    const project = projects.find(item => item.id === target.projectId);
+    if (!project || projectLocked(project.id)) return null;
+    const width = info.bounds.right - info.bounds.left;
+    const height = info.bounds.top - info.bounds.bottom;
+    let { u, v } = position;
+    for (let pass = 0; pass < 8; pass++) {
+      for (const site of project.sites) {
+        const marker = markers.find(item => item.id === site.id);
+        if (!marker) continue;
+        const dx = (u - marker.u) * width;
+        const dy = (v - marker.v) * height;
+        const distance = Math.hypot(dx, dy);
+        if (distance > project.radius_m * 0.97) {
+          const ratio = project.radius_m * 0.97 / distance;
+          u = marker.u + dx * ratio / width;
+          v = marker.v + dy * ratio / height;
+        }
+      }
+    }
+    return { x: info.bounds.left + u * width, y: info.bounds.top - v * height, u, v };
+  }
+
+  function minimumProjectRadius(project: Project) {
+    if (!info) return 50;
+    const center = markers.find(item => item.id === `center:${project.id}`);
+    if (!center) return 50;
+    const width = info.bounds.right - info.bounds.left;
+    const height = info.bounds.top - info.bounds.bottom;
+    return Math.max(50, ...project.sites.map(site => {
+      const marker = markers.find(item => item.id === site.id);
+      return marker ? Math.ceil(Math.hypot((marker.u - center.u) * width,
+        (marker.v - center.v) * height) * 1.03) : 50;
+    }));
+  }
+
+  function distanceFromProjectCenter(clientX: number, clientY: number, projectId: string) {
+    const center = markers.find(item => item.id === `center:${projectId}`);
+    const rect = map.current?.getBoundingClientRect();
+    if (!center || !rect || !info) return 0;
+    const x = rect.left + center.u * rect.width;
+    const y = rect.top + center.v * rect.height;
+    return Math.hypot((clientX - x) / rect.width * (info.bounds.right - info.bounds.left),
+      (clientY - y) / rect.height * (info.bounds.top - info.bounds.bottom));
+  }
+
   async function coordinateAt(x: number, y: number) {
     const response = await fetch(`/api/terrain/coordinates?x=${encodeURIComponent(x)}&y=${encodeURIComponent(y)}`);
     if (!response.ok) throw new Error("Invalid lunar location");
@@ -321,7 +410,8 @@ export default function LunarMap({ landmarksEnabled, projects, hiddenProjectIds,
   }
 
   async function place(target: Target | null, position: ReturnType<typeof normalizedPoint>) {
-    if (!position || (target?.siteId && !unlockedSiteIds.includes(target.siteId))) return;
+    if (!position || (target?.siteId ? !unlockedSiteIds.includes(target.siteId)
+      : target ? projectLocked(target.projectId) : false)) return;
     setSaving(true);
     setError("");
     try {
@@ -330,7 +420,7 @@ export default function LunarMap({ landmarksEnabled, projects, hiddenProjectIds,
       if (target?.siteId) await onMoveSite(target, coords.latitude, coords.longitude);
       else if (target) await onMoveProjectCenter(target.projectId, coords.latitude, coords.longitude);
     } catch {
-      setError("Could not save landing-site location.");
+      setError(target?.siteId ? "Could not save landing-site location." : "Could not move the search region.");
     } finally {
       setSaving(false);
       setPreview(null);
@@ -351,14 +441,22 @@ export default function LunarMap({ landmarksEnabled, projects, hiddenProjectIds,
       const element = event.target as HTMLElement;
       const markerId = element.closest<HTMLElement>("[data-site-id]")?.dataset.siteId;
       const centerId = element.closest<HTMLElement>("[data-project-center]")?.dataset.projectCenter;
+      const circleId = element.closest<HTMLElement>("[data-project-drag]")?.dataset.projectDrag;
+      const radiusProjectId = element.closest<HTMLElement>("[data-project-radius]")?.dataset.projectRadius ?? null;
       const markerTarget = markerId
         ? projectSites.find(item => item.site.id === markerId)?.target ?? null
-        : centerId ? { projectId: centerId } : null;
+        : centerId ? { projectId: centerId } : circleId ? { projectId: circleId } : null;
       const explore = !!exploreArea && !!element.closest("[data-explore-drag]");
       const rect = map.current?.getBoundingClientRect();
       const center = explorePreview ?? exploreMarker;
+      const projectCenter = circleId ? markers.find(item => item.id === `center:${circleId}`) : null;
       gesture.current = {
         start: pointer, last: pointer, moved: false, pinch: false, distance: 0, marker: markerTarget,
+        markerOffset: circleId && rect && projectCenter
+          ? { x: pointer.x - (rect.left + projectCenter.u * rect.width), y: pointer.y - (rect.top + projectCenter.v * rect.height) }
+          : { x: 0, y: 0 },
+        radiusProjectId,
+        radiusStartDistance: radiusProjectId ? distanceFromProjectCenter(pointer.x, pointer.y, radiusProjectId) : 0,
         explore,
         exploreOffset: explore && rect && center
           ? { x: pointer.x - (rect.left + center.u * rect.width), y: pointer.y - (rect.top + center.v * rect.height) }
@@ -369,6 +467,7 @@ export default function LunarMap({ landmarksEnabled, projects, hiddenProjectIds,
       gesture.current.pinch = true;
       gesture.current.distance = Math.hypot(a.x - b.x, a.y - b.y);
       setPreview(null);
+      setRadiusPreview(null);
       setExplorePreview(null);
     }
   }
@@ -394,12 +493,25 @@ export default function LunarMap({ landmarksEnabled, projects, hiddenProjectIds,
     if (movement > 5) gesture.current.moved = true;
     if (!gesture.current.moved || gesture.current.pinch) return;
 
-    if (gesture.current.explore) {
+    if (gesture.current.radiusProjectId) {
+      const project = projects.find(item => item.id === gesture.current?.radiusProjectId);
+      if (project && !projectLocked(project.id)) {
+        const distance = distanceFromProjectCenter(now.x, now.y, project.id);
+        setRadiusPreview({ id: project.id, radius: Math.round(clamp(
+          project.radius_m + distance - gesture.current.radiusStartDistance,
+          minimumProjectRadius(project), 20000)) });
+      }
+    } else if (gesture.current.explore) {
       const location = constrainedPoint(now.x - gesture.current.exploreOffset.x,
         now.y - gesture.current.exploreOffset.y);
       if (location) setExplorePreview({ u: location.u, v: location.v });
-    } else if (gesture.current.marker && (!gesture.current.marker.siteId || unlockedSiteIds.includes(gesture.current.marker.siteId))) {
-      const location = withinSearchRadius(constrainedPoint(now.x, now.y), gesture.current.marker);
+    } else if (gesture.current.marker && (gesture.current.marker.siteId
+      ? unlockedSiteIds.includes(gesture.current.marker.siteId)
+      : !projectLocked(gesture.current.marker.projectId))) {
+      const target = gesture.current.marker;
+      const point = constrainedPoint(now.x - gesture.current.markerOffset.x,
+        now.y - gesture.current.markerOffset.y);
+      const location = target.siteId ? withinSearchRadius(point, target) : withinProjectSites(point, target);
       const id = gesture.current.marker.siteId ?? `center:${gesture.current.marker.projectId}`;
       if (location) setPreview({ id, u: location.u, v: location.v });
     } else {
@@ -419,6 +531,21 @@ export default function LunarMap({ landmarksEnabled, projects, hiddenProjectIds,
     if (!lastPointer || !current) return;
     gesture.current = null;
     if (current.pinch) return;
+
+    if (current.radiusProjectId) {
+      const project = projects.find(item => item.id === current.radiusProjectId);
+      const radius = project ? Math.round(clamp(project.radius_m +
+        distanceFromProjectCenter(event.clientX, event.clientY, project.id) - current.radiusStartDistance,
+        minimumProjectRadius(project), 20000)) : null;
+      if (current.moved && project && !projectLocked(project.id) && radius !== null && radius !== project.radius_m) {
+        setSaving(true);
+        setError("");
+        void onResizeProject(project.id, radius)
+          .catch(() => setError("Could not resize the search region."))
+          .finally(() => { setSaving(false); setRadiusPreview(null); });
+      } else setRadiusPreview(null);
+      return;
+    }
 
     if (current.explore && current.moved) {
       const location = constrainedPoint(event.clientX - current.exploreOffset.x,
@@ -448,15 +575,21 @@ export default function LunarMap({ landmarksEnabled, projects, hiddenProjectIds,
       return;
     }
 
-    if (current.marker && current.moved && (!current.marker.siteId || unlockedSiteIds.includes(current.marker.siteId))) {
-      const location = withinSearchRadius(constrainedPoint(event.clientX, event.clientY), current.marker);
+    if (current.marker && current.moved && (current.marker.siteId
+      ? unlockedSiteIds.includes(current.marker.siteId) : !projectLocked(current.marker.projectId))) {
+      const point = constrainedPoint(event.clientX - current.markerOffset.x,
+        event.clientY - current.markerOffset.y);
+      const location = current.marker.siteId ? withinSearchRadius(point, current.marker)
+        : withinProjectSites(point, current.marker);
       onSelectSite(current.marker);
-      void place(current.marker, location);
+      if (location) void place(current.marker, location);
     } else if (current.marker && !current.moved) {
       const active = current.marker.projectId === selected?.projectId && current.marker.siteId === selected?.siteId;
-      onSelectSite(active ? null : current.marker);
-    } else if (!current.moved && !current.marker && selected && !selectedLocked) {
-      void place(selected, withinSearchRadius(normalizedPoint(event.clientX, event.clientY), selected));
+      if (!current.markerOffset.x && !current.markerOffset.y) onSelectSite(active ? null : current.marker);
+    } else if (!current.moved && !current.marker && !probePoint && selected && !selectedLocked) {
+      const point = normalizedPoint(event.clientX, event.clientY);
+      void place(selected, selected.siteId ? withinSearchRadius(point, selected)
+        : withinProjectSites(point, selected));
     }
   }
 
@@ -543,6 +676,7 @@ export default function LunarMap({ landmarksEnabled, projects, hiddenProjectIds,
           pointers.current.delete(event.pointerId);
           gesture.current = null;
           setPreview(null);
+          setRadiusPreview(null);
           setExplorePreview(null);
         }}
       >
@@ -607,31 +741,43 @@ export default function LunarMap({ landmarksEnabled, projects, hiddenProjectIds,
               const marker = markers.find(item => item.id === id);
               const position = preview?.id === id ? preview : marker;
               if (!position) return null;
-              const radiusX = (project.radius_m / (info.bounds.right - info.bounds.left)) * 100;
-              const radiusY = (project.radius_m / (info.bounds.top - info.bounds.bottom)) * 100;
-              const active = selected?.projectId === project.id && !selected.siteId;
+              const radius = radiusPreview?.id === project.id ? radiusPreview.radius : project.radius_m;
+              const active = selected?.projectId === project.id;
+              const locked = projectLocked(project.id);
+              const visualRadius = Math.max(radius / (info.bounds.right - info.bounds.left) * side,
+                (active ? 24 : 8) / zoom);
               return (
                 <div key={id}>
-                  <div className="pointer-events-none absolute rounded-full border border-dashed"
-                    title={`${project.name} search radius: ${project.radius_m} m`}
+                  <button type="button" data-project-drag={active && !locked ? project.id : undefined}
+                    tabIndex={active && !locked ? 0 : -1}
+                    aria-label={`${project.name} search region, ${Math.round(radius)} metres; ${locked ? "unlock its sites to edit" : active ? "drag to move" : "select the center to edit"}`}
+                    onClick={event => { event.stopPropagation(); onSelectSite({ projectId: project.id }); }}
+                    className={`absolute z-[7] rounded-full border border-dashed ${active && !locked ? "cursor-grab active:cursor-grabbing" : "pointer-events-none"}`}
+                    title={`${project.name} search radius: ${Math.round(radius)} m${locked ? "; unlock its landing sites to edit" : active ? "; drag circle to move; use handle to resize" : ""}`}
                     style={{
                       left: `${position.u * 100}%`, top: `${position.v * 100}%`,
-                      width: `${radiusX * 2}%`, height: `${radiusY * 2}%`,
+                      width: visualRadius * 2, height: visualRadius * 2,
                       transform: "translate(-50%, -50%)", borderColor: project.color,
-                      backgroundColor: `${project.color}20`,
+                      backgroundColor: `${project.color}${active ? "26" : "14"}`,
                     }} />
                   <button key={project.id} type="button" data-project-center={project.id}
-                    aria-label={`Move or select ${project.name} search center`}
-                    title={`${project.name}: search center; drag to move; radius ${project.radius_m} m`}
-                    className="absolute z-10 flex h-7 w-7 cursor-grab items-center justify-center active:cursor-grabbing"
+                    aria-label={`${locked ? "Select" : "Move or select"} ${project.name} search center`}
+                    title={`${project.name}: search center; ${locked ? "unlock landing sites to move" : "drag to move"}; radius ${project.radius_m} m`}
+                    className={`absolute z-10 flex h-7 w-7 items-center justify-center ${locked ? "cursor-pointer" : "cursor-grab active:cursor-grabbing"}`}
                     style={{ left: `${position.u * 100}%`, top: `${position.v * 100}%`,
                       transform: `translate(-50%, -50%) scale(${1 / zoom})` }}>
-                    <span className="pointer-events-none flex h-4 w-4 items-center justify-center rounded-full border-2 border-white"
-                      style={{ backgroundColor: project.color,
-                        boxShadow: active ? `0 0 0 4px ${project.color}55` : "none" }}>
-                      <span className="h-1 w-1 rounded-full bg-white" />
-                    </span>
+                    <Plus size={active ? 15 : 13} strokeWidth={2.5} className="pointer-events-none drop-shadow-[0_1px_2px_#000]"
+                      style={{ color: project.color }} />
                   </button>
+                  {active && <button type="button" data-project-radius={locked ? undefined : project.id}
+                    disabled={locked}
+                    aria-label={`Resize ${project.name} search radius, currently ${Math.round(radius)} metres`}
+                    title={locked ? "Unlock all landing sites to resize this search region" : `Drag to resize search radius · ${Math.round(radius)} m`}
+                    className="absolute z-[11] flex h-8 w-8 items-center justify-center disabled:cursor-not-allowed enabled:cursor-ew-resize"
+                    style={{ left: `calc(${position.u * 100}% + ${visualRadius}px)`, top: `${position.v * 100}%`,
+                      transform: `translate(-50%, -50%) scale(${1 / zoom})` }}>
+                    <span className={`pointer-events-none h-3 w-3 rounded-full border-2 border-[#242424] shadow-[0_0_0_1px_#fff] ${locked ? "bg-[#aeb8bd]" : "bg-white"}`} />
+                  </button>}
                 </div>
               );
             })}
@@ -675,7 +821,7 @@ export default function LunarMap({ landmarksEnabled, projects, hiddenProjectIds,
                 </button>
               </div>;
             })}
-            {probeMarker && <span className="pointer-events-none absolute z-[12] h-4 w-4 rounded-full border-2 border-white bg-[#03ace4] shadow-[0_0_0_3px_#03ace477]"
+            {probeMarker && <span className="pointer-events-none absolute z-[12] h-4 w-4 rounded-full border-2 border-white bg-accent shadow-[0_0_0_3px_#03ace477]"
               style={{ left: `${probeMarker.u * 100}%`, top: `${probeMarker.v * 100}%`,
                 transform: `translate(-50%, -50%) scale(${1 / zoom})` }} />}
             {projectSites.map(({ target, site, color }) => {
@@ -713,6 +859,10 @@ export default function LunarMap({ landmarksEnabled, projects, hiddenProjectIds,
       <div className="pointer-events-none absolute left-3 top-3 z-20 hidden bg-[#242424]/95 px-3 py-2 text-[11px] @min-[640px]:block">
         LUNAR SOUTH POLE <span className="ml-1 text-[#aaa]">80°S–90°S</span>
       </div>
+      {probePoint && landmarksEnabled && !exploreArea && <button type="button" onClick={onOpenProbe}
+        className="absolute left-2 top-2 z-20 flex min-h-9 items-center gap-2 bg-[#242424]/95 px-3 text-xs font-medium text-accent hover:bg-[#34454b] hover:text-white sm:left-3 @min-[640px]:top-14">
+        <MapPin size={15} /> Save inspected point
+      </button>}
       <div className="absolute right-2 top-2 z-20 flex max-w-[calc(100%-16px)] flex-col items-end gap-1.5 sm:right-3 sm:top-3 sm:max-w-[calc(100%-24px)]">
         <div className="flex items-center gap-1.5">
           <button type="button" aria-label="Map layers" aria-expanded={layerPanelOpen} aria-controls="orbis-map-layers"
@@ -723,7 +873,10 @@ export default function LunarMap({ landmarksEnabled, projects, hiddenProjectIds,
           <div role="group" aria-label="Map navigation" className="flex h-9 items-center bg-[#242424]/95 px-0.5">
             <button type="button" title="Zoom in" aria-label="Zoom in" className="flex h-8 w-8 items-center justify-center hover:bg-[#444]" onClick={() => changeZoom(1.5)}><Plus size={16} /></button>
             <button type="button" title="Zoom out" aria-label="Zoom out" className="flex h-8 w-8 items-center justify-center hover:bg-[#444]" onClick={() => changeZoom(1 / 1.5)}><Minus size={16} /></button>
-            <button type="button" title="Reset view" aria-label="Reset view" className="flex h-8 w-8 items-center justify-center hover:bg-[#444]" onClick={reset}><LocateFixed size={16} /></button>
+            <button type="button" title={focusTarget ? "Zoom to selected point" : "Select a point to zoom to"}
+              aria-label="Zoom to selected point" disabled={!focusTarget}
+              className="flex h-8 w-8 items-center justify-center hover:bg-[#444] disabled:cursor-not-allowed disabled:opacity-40"
+              onClick={zoomToSelection}><LocateFixed size={16} /></button>
           </div>
         </div>
         {layerPanelOpen && <div id="orbis-map-layers" className="orbis-overlay-enter w-[min(260px,calc(100vw-24px))] border border-[#4b555a] bg-[#292d30]/98 p-2.5 text-xs shadow-[0_8px_24px_#0008]">
@@ -768,7 +921,9 @@ export default function LunarMap({ landmarksEnabled, projects, hiddenProjectIds,
       {!hintDismissed && <div className="pointer-events-none absolute bottom-2 left-2 right-2 z-20 flex max-w-full items-center gap-2 bg-[#242424]/95 p-2 font-mono text-[10px] sm:bottom-3 sm:left-3 sm:right-auto sm:text-[11px]">
         <div className="min-w-0 flex-1 truncate">
           {probeMode ? <span>Tap terrain to inspect a point</span> : exploreArea ? <span>Tap terrain or drag the white circle to move the search area</span> : point ? <><div>LAT {point.latitude.toFixed(5)}°</div><div>LON {point.longitude.toFixed(5)}°</div></> :
-            <span className="text-[#aaa]">{selectedLocked ? "Unlock site in Browse to move it" : selected?.siteId ? "Click terrain to move selected site" : selected ? "Click terrain to move search center" : "Select a site or project center"}</span>}
+            <span className="text-[#aaa]">{selectedLocked
+              ? selected?.siteId ? "Unlock site in Browse to move it" : "Unlock all project sites in Browse to edit the search region"
+              : selected?.siteId ? "Click terrain to move selected site" : selected ? "Drag the circle or click terrain to move the search region" : "Select a site or project center"}</span>}
         </div>
         <button type="button" onClick={dismissHint} aria-label="Dismiss map hint permanently" title="Hide map hint in this browser"
           className="pointer-events-auto shrink-0 p-1 text-[#aaa] hover:text-white"><X size={14} /></button>

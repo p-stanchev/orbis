@@ -145,20 +145,6 @@ def distance_m(lat_a: float, lon_a: float, lat_b: float, lon_b: float) -> float:
     return 1_737_400 * angle
 
 
-def translated_site(old_lat: float, old_lon: float, new_lat: float, new_lon: float,
-                    site_lat: float, site_lon: float) -> tuple[float, float]:
-    a, b = math.radians(old_lat), math.radians(site_lat)
-    delta_lon = math.radians(site_lon - old_lon)
-    bearing = math.atan2(math.sin(delta_lon) * math.cos(b),
-                         math.cos(a) * math.sin(b) - math.sin(a) * math.cos(b) * math.cos(delta_lon))
-    arc = distance_m(old_lat, old_lon, site_lat, site_lon) / 1_737_400
-    c = math.radians(new_lat)
-    latitude = math.asin(math.sin(c) * math.cos(arc) + math.cos(c) * math.sin(arc) * math.cos(bearing))
-    longitude = math.radians(new_lon) + math.atan2(math.sin(bearing) * math.sin(arc) * math.cos(c),
-                                                     math.cos(arc) - math.sin(c) * math.sin(latitude))
-    return math.degrees(latitude), (math.degrees(longitude) + 180) % 360 - 180
-
-
 async def broadcast_presence():
     for client in tuple(manager.connections):
         try:
@@ -218,15 +204,11 @@ async def update_project(project_id: str, data: ProjectUpdate):
     center_lat = changes.get("center_latitude", project["center_latitude"])
     center_lon = changes.get("center_longitude", project["center_longitude"])
     radius = changes.get("radius_m", project["radius_m"])
-    moving_center = center_lat != project["center_latitude"] or center_lon != project["center_longitude"]
-    moved_sites = [(site["id"], *translated_site(project["center_latitude"], project["center_longitude"],
-                                                 center_lat, center_lon, site["latitude"], site["longitude"]))
-                   for site in project["sites"]] if moving_center else [
-                       (site["id"], site["latitude"], site["longitude"]) for site in project["sites"]]
-    if any(distance_m(center_lat, center_lon, lat, lon) > radius + 0.5 for _, lat, lon in moved_sites):
-        raise HTTPException(422, "Search radius cannot exclude existing landing sites")
-    if any(lat < -90 or lat > -80 for _, lat, _ in moved_sites):
-        raise HTTPException(422, "Moving this search center would place a site outside map coverage")
+    if ("center_latitude" in changes or "center_longitude" in changes or "radius_m" in changes) and any(
+        distance_m(center_lat, center_lon, site["latitude"], site["longitude"]) > radius + 0.5
+        for site in project["sites"]
+    ):
+        raise HTTPException(422, "Search region must contain all landing sites")
 
     columns = ", ".join(f"{key} = ?" for key in changes)
     try:
@@ -235,9 +217,6 @@ async def update_project(project_id: str, data: ProjectUpdate):
                 f"UPDATE projects SET {columns} WHERE id = ?",
                 [*changes.values(), project_id],
             )
-            if moving_center:
-                connection.executemany("UPDATE landing_sites SET latitude = ?, longitude = ? WHERE id = ?",
-                                       [(lat, lon, site_id) for site_id, lat, lon in moved_sites])
     except sqlite3.IntegrityError:
         raise HTTPException(409, "Invalid or duplicate project data")
 
@@ -294,7 +273,9 @@ async def update_site(project_id: str, site_id: str, data: SiteUpdate):
 
     latitude = changes.get("latitude", site["latitude"])
     longitude = changes.get("longitude", site["longitude"])
-    if distance_m(project["center_latitude"], project["center_longitude"], latitude, longitude) > project["radius_m"] + 0.5:
+    if ("latitude" in changes or "longitude" in changes) and distance_m(
+        project["center_latitude"], project["center_longitude"], latitude, longitude
+    ) > project["radius_m"] + 0.5:
         raise HTTPException(422, "Landing site must stay inside the project search radius")
 
     columns = ", ".join(f"{key} = ?" for key in changes)

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { SearchGridCell, SearchRegion } from "./VisibilityStatistics";
+import NumericInput from "./NumericInput";
 
 type Area = { latitude: number; longitude: number; radius_m: number };
 type Result = { regions: SearchRegion[]; grid: SearchGridCell[]; grid_spacing_m: number;
@@ -71,11 +72,11 @@ export default function ExploreSearch({ area, onAreaChange, onRegions, onCreateP
     onRegions([], [], 0);
   }
 
-  function commitCenter() {
-    const latitude = Number(center.latitude);
-    const longitude = Number(center.longitude);
-    const radius_m = Number(center.radius) * 1000;
-    if (!center.latitude.trim() || !center.longitude.trim() || !center.radius.trim() ||
+  function commitCenter(nextCenter = center) {
+    const latitude = Number(nextCenter.latitude);
+    const longitude = Number(nextCenter.longitude);
+    const radius_m = Number(nextCenter.radius) * 1000;
+    if (!nextCenter.latitude.trim() || !nextCenter.longitude.trim() || !nextCenter.radius.trim() ||
       !Number.isFinite(latitude) || latitude < -90 || latitude > -80 ||
       !Number.isFinite(longitude) || longitude < -180 || longitude > 180 ||
       !Number.isFinite(radius_m) || radius_m < 50 || radius_m > 20000) {
@@ -218,22 +219,25 @@ export default function ExploreSearch({ area, onAreaChange, onRegions, onCreateP
       <p className="text-[#aaa]">Click the map or drag the white circle to move the area.</p>
       <div className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2">
         <label className={label}>Latitude
-          <input className={input} type="text" inputMode="decimal" value={center.latitude}
-            onChange={event => { setCenter(old => ({ ...old, latitude: event.target.value })); invalidate(); }} onBlur={commitCenter} /></label>
+          <NumericInput className={input} type="text" inputMode="decimal" min={-90} max={-80} increment={0.0001} value={center.latitude}
+            onValueChange={value => { setCenter(old => ({ ...old, latitude: value })); invalidate(); }}
+            onStep={value => commitCenter({ ...center, latitude: value })} onBlur={() => commitCenter()} /></label>
         <label className={label}>Longitude
-          <input className={input} type="text" inputMode="decimal" value={center.longitude}
-            onChange={event => { setCenter(old => ({ ...old, longitude: event.target.value })); invalidate(); }} onBlur={commitCenter} /></label>
+          <NumericInput className={input} type="text" inputMode="decimal" min={-180} max={180} increment={0.0001} value={center.longitude}
+            onValueChange={value => { setCenter(old => ({ ...old, longitude: value })); invalidate(); }}
+            onStep={value => commitCenter({ ...center, longitude: value })} onBlur={() => commitCenter()} /></label>
       </div>
       <label className={label}>Search radius <span className="font-normal text-[#929ca1]">· km, up to 20</span>
-        <input className={input} type="text" inputMode="decimal" value={center.radius}
-          onChange={event => { setCenter(old => ({ ...old, radius: event.target.value })); invalidate(); }} onBlur={commitCenter} /></label>
+        <NumericInput className={input} type="text" inputMode="decimal" min={0.05} max={20} increment={0.1} value={center.radius}
+          onValueChange={value => { setCenter(old => ({ ...old, radius: value })); invalidate(); }}
+          onStep={value => commitCenter({ ...center, radius: value })} onBlur={() => commitCenter()} /></label>
     </section>
     <section className="orbis-panel space-y-3 p-3"><h3 className="font-medium text-white">Mission timing</h3>
       <div className="grid grid-cols-1 gap-3 min-[440px]:grid-cols-2">
         <label className={label}>Arrival <span className="font-normal text-[#929ca1]">· UTC</span>
           <input className={input} type="datetime-local" value={arrival} onChange={event => setArrival(event.target.value)} /></label>
         <label className={label}>Duration <span className="font-normal text-[#929ca1]">· hours</span>
-          <input className={input} type="number" min={1} max={8760} value={duration} onChange={event => setDuration(event.target.value)} /></label>
+          <NumericInput className={input} min={1} max={8760} value={duration} onValueChange={setDuration} /></label>
       </div>
     </section>
     <section className="orbis-panel space-y-3 p-3">
@@ -241,21 +245,21 @@ export default function ExploreSearch({ area, onAreaChange, onRegions, onCreateP
       <p className="text-[#aaa]">Set both outage limits. Add contact, area, slope, or roughness requirements if needed.</p>
       <div className="grid grid-cols-1 gap-4 min-[440px]:grid-cols-2">
         <label className={label}>Longest darkness <span className="text-[#999]">· h</span>
-          <input className={input} type="number" min={0} max={8760} step="any" required placeholder="Hours" value={sunLimit} onChange={event => setSunLimit(event.target.value)} /></label>
+          <NumericInput className={input} min={0} max={8760} step="any" increment={1} required placeholder="Hours" value={sunLimit} onValueChange={setSunLimit} /></label>
         <label className={label}>Longest Earth outage <span className="text-[#999]">· h</span>
-          <input className={input} type="number" min={0} max={8760} step="any" required placeholder="Hours" value={earthLimit} onChange={event => setEarthLimit(event.target.value)} /></label>
+          <NumericInput className={input} min={0} max={8760} step="any" increment={1} required placeholder="Hours" value={earthLimit} onValueChange={setEarthLimit} /></label>
         <label className={label}>Earth contact / day <span className="text-[#999]">· h, optional</span>
-          <input className={input} type="number" min={0} max={24} step="0.5" placeholder="No minimum" value={dailyEarth} onChange={event => setDailyEarth(event.target.value)} /></label>
+          <NumericInput className={input} min={0} max={24} step="0.5" placeholder="No minimum" value={dailyEarth} onValueChange={setDailyEarth} /></label>
         <label className={label}>Minimum candidate area <span className="text-[#999]">· km², optional</span>
-          <input className={input} type="number" min={0.001} max={1000} step="any" placeholder="Auto" value={minArea} onChange={event => setMinArea(event.target.value)} /></label>
+          <NumericInput className={input} min={0.001} max={1000} step="any" increment={0.1} placeholder="Auto" value={minArea} onValueChange={setMinArea} /></label>
         <label className={label}>Maximum local slope <span className="text-[#999]">· °, optional</span>
-          <input className={input} type="number" min={0} max={90} step="any" placeholder="No slope filter" value={slopeLimit} onChange={event => setSlopeLimit(event.target.value)} /></label>
+          <NumericInput className={input} min={0} max={90} step="any" increment={0.5} placeholder="No slope filter" value={slopeLimit} onValueChange={setSlopeLimit} /></label>
         <label className={label}>Maximum roughness <span className="text-[#999]">· m, optional</span>
-          <input className={input} type="number" min={0} max={1000} step="any" placeholder="No roughness filter" value={roughnessLimit} onChange={event => setRoughnessLimit(event.target.value)} /></label>
+          <NumericInput className={input} min={0} max={1000} step="any" increment={0.1} placeholder="No roughness filter" value={roughnessLimit} onValueChange={setRoughnessLimit} /></label>
       </div>
     </section>
     <button type="button" disabled={running} onClick={() => void search()}
-      className="min-h-10 w-full bg-accent px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-[#079bc9] disabled:cursor-wait disabled:opacity-50">{running ? progress || "Calculating…" : "Search candidate areas"}</button>
+      className="min-h-10 w-full bg-accent px-3 py-2 text-xs font-medium text-white transition-[filter] hover:brightness-90 disabled:cursor-wait disabled:opacity-50">{running ? progress || "Calculating…" : "Search candidate areas"}</button>
     {error && <p role="alert" className="text-[#ef9292]">{error}</p>}
     {result && <section className="space-y-2 border-t border-[#444] pt-3">
       <div className="flex flex-wrap items-end justify-between gap-2"><h3 className="font-medium text-white">Candidate areas</h3>

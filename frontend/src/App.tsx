@@ -20,6 +20,7 @@ import {
   MapPin,
   Menu,
   MoreHorizontal,
+  MousePointer2,
   Eye,
   EyeOff,
   Pencil,
@@ -36,6 +37,7 @@ import SplitWorkspace from "./components/SplitWorkspace";
 import VisibilityStatistics, { type SearchRegion, type SearchGridCell } from "./components/VisibilityStatistics";
 import ExploreSearch from "./components/ExploreSearch";
 import ResilienceExplorer from "./components/ResilienceExplorer";
+import NumericInput from "./components/NumericInput";
 
 type Site = { id: string; name: string; latitude: number; longitude: number };
 type Project = {
@@ -143,14 +145,14 @@ function Coordinate({
     setError(false);
   }, [value]);
 
-  async function commit() {
+  async function commit(nextDraft = draft) {
     if (disabled) { setDraft(String(value)); return; }
     if (cancelled.current) {
       cancelled.current = false;
       return;
     }
-    const number = Number(draft);
-    if (!draft.trim() || !Number.isFinite(number)) {
+    const number = Number(nextDraft);
+    if (!nextDraft.trim() || !Number.isFinite(number)) {
       setDraft(String(value));
       return;
     }
@@ -170,14 +172,18 @@ function Coordinate({
   return (
     <label className="block text-xs text-[#aaa]">
       {label}
-      <input
+      <NumericInput
         key={label}
         value={draft}
         type="text"
         inputMode="decimal"
+        min={min ?? (label.toLowerCase().includes("latitude") ? -90 : -180)}
+        max={max ?? (label.toLowerCase().includes("latitude") ? 90 : 180)}
+        increment={0.0001}
         aria-label={label}
         disabled={disabled}
-        onChange={(event) => setDraft(event.target.value)}
+        onValueChange={setDraft}
+        onStep={next => void commit(next)}
         onBlur={() => void commit()}
         onKeyDown={(event) => {
           if (event.key === "Enter") event.currentTarget.blur();
@@ -200,9 +206,11 @@ function Coordinate({
 
 function MissionSettings({
   project,
+  regionLocked,
   save,
 }: {
   project: Project;
+  regionLocked: boolean;
   save: (changes: MissionChanges) => Promise<void>;
 }) {
   const [arrival, setArrival] = useState(project.arrival_utc.slice(0, 16));
@@ -236,9 +244,9 @@ function MissionSettings({
     }
   }
 
-  async function saveDuration() {
-    if (saving || duration === String(project.duration_hours)) return;
-    const hours = Number(duration);
+  async function saveDuration(nextDuration = duration) {
+    if (saving || nextDuration === String(project.duration_hours)) return;
+    const hours = Number(nextDuration);
     if (!Number.isInteger(hours) || hours < 1 || hours > 8760) {
       setError("Duration must be 1–8760 hours.");
       return;
@@ -255,8 +263,9 @@ function MissionSettings({
     }
   }
 
-  async function saveRadius() {
-    const next = Number(radius);
+  async function saveRadius(nextRadius = radius) {
+    if (regionLocked) return;
+    const next = Number(nextRadius);
     if (saving || next === project.radius_m) return;
     if (!Number.isFinite(next) || next < 50 || next > 20000) {
       setError("Search radius must be 50–20,000 metres.");
@@ -292,14 +301,14 @@ function MissionSettings({
       </label>
       <label className="block text-[#aaa]">
         Mission duration (hours)
-        <input
-          type="number"
+        <NumericInput
           min={1}
           max={8760}
           step={1}
           aria-label="Mission duration in hours"
           value={duration}
-          onChange={(event) => setDuration(event.target.value)}
+          onValueChange={setDuration}
+          onStep={next => void saveDuration(next)}
           onBlur={() => void saveDuration()}
           onKeyDown={(event) => {
             if (event.key === "Enter") event.currentTarget.blur();
@@ -314,18 +323,22 @@ function MissionSettings({
       <div className="space-y-2 border-t border-[#555] pt-3">
         <p className="text-[#ddd]">Search region</p>
         <Coordinate key={`${project.id}-center-lat`} label="Center latitude" value={project.center_latitude}
-          min={-90} max={-80} save={value => save({ center_latitude: value })} />
+          min={-90} max={-80} disabled={regionLocked} save={value => save({ center_latitude: value })} />
         <Coordinate key={`${project.id}-center-lon`} label="Center longitude" value={project.center_longitude}
-          save={value => save({ center_longitude: value })} />
+          disabled={regionLocked} save={value => save({ center_longitude: value })} />
         <label className="block text-[#aaa]">
           Search radius (m)
-          <input type="number" min={50} max={20000} step={50} value={radius}
-            onChange={event => setRadius(event.target.value)}
+          <NumericInput min={50} max={20000} step={50} value={radius}
+            disabled={regionLocked}
+            onValueChange={setRadius}
+            onStep={next => void saveRadius(next)}
             onBlur={() => void saveRadius()}
             onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); }}
             className="mt-1 w-full border border-[#555] bg-[#292929] p-2 text-white outline-none focus:border-accent [color-scheme:dark]" />
         </label>
-        <p className="text-[11px] text-[#999]">The coloured ring marks the search area, not a verified safe landing zone. Select the project and click the map to move its center.</p>
+        <p className="text-[11px] text-[#999]">{regionLocked
+          ? "Unlock all landing sites in Browse to edit the search region."
+          : "The coloured ring marks the search area, not a verified safe landing zone. Select the project and drag its circle or edge handle to edit it."}</p>
       </div>
       {error && <p role="alert" className="text-[#ef9292]">{error}</p>}
       {saving && <p className="text-[#aaa]">Saving...</p>}
@@ -336,6 +349,7 @@ function MissionSettings({
 function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [workspace, setWorkspace] = useState<"map" | "explore" | "analysis" | "statistics">("map");
+  const [selectedMissionHours, setSelectedMissionHours] = useState(0);
   const [exploreMode, setExploreMode] = useState<"candidates" | "resilience">("candidates");
   const [browseOpen, setBrowseOpen] = useState(true);
   const [inspectorOpen, setInspectorOpen] = useState(true);
@@ -351,6 +365,10 @@ function App() {
   const [inspectorWidth, setInspectorWidth] = useState(() => savedWidth(INSPECTOR_WIDTH_KEY, 280));
   const resizing = useRef<"browse" | "inspector" | null>(null);
   const [probePoint, setProbePoint] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [probeCandidateName, setProbeCandidateName] = useState("");
+  const [probeSaveError, setProbeSaveError] = useState("");
+  const [probeSaving, setProbeSaving] = useState(false);
+  const [mapFocus, setMapFocus] = useState<{ latitude: number; longitude: number; revision: number } | null>(null);
   const [probeMode, setProbeMode] = useState(false);
   const [expanded, setExpanded] = useState<string[]>([]);
   const [search, setSearch] = useState("");
@@ -500,7 +518,15 @@ function App() {
   const currentSite = currentProject?.sites.find(
     (site) => site.id === selected?.siteId,
   );
+  useEffect(() => {
+    if (probePoint && currentProject) {
+      setProbeCandidateName(`Candidate Site ${currentProject.sites.length + 1}`);
+      setProbeSaveError("");
+    }
+  }, [probePoint?.latitude, probePoint?.longitude, currentProject?.id]);
   const canAnalyze = !!currentProject && (!!currentSite || !!probePoint);
+  useEffect(() => { setSelectedMissionHours(0); }, [currentProject?.id, currentProject?.arrival_utc, currentProject?.duration_hours,
+    selected?.siteId, probePoint?.latitude, probePoint?.longitude]);
   useEffect(() => {
     if (workspace === "analysis" && !canAnalyze) setWorkspace("map");
   }, [workspace, canAnalyze]);
@@ -512,6 +538,30 @@ function App() {
   };
   const urlFor = (target: Target) =>
     `/api/projects/${target.projectId}${target.siteId ? `/sites/${target.siteId}` : ""}`;
+
+  function focusMap(point: { latitude: number; longitude: number }) {
+    setMapFocus(current => ({ ...point, revision: (current?.revision ?? 0) + 1 }));
+    setWorkspace("map");
+    setProbeMode(false);
+    setDrawer(null);
+  }
+
+  function unlockNewSite(siteId: string) {
+    setUnlockedSites(current => current.includes(siteId) ? current : [...current, siteId]);
+  }
+
+  async function saveInspectedPoint(candidateName: string, point: { latitude: number; longitude: number }) {
+    if (!currentProject) throw new Error("Select a project before saving this point.");
+    if (!candidateName.trim()) throw new Error("Enter a candidate site name.");
+    const site = await request<Site>(`/api/projects/${currentProject.id}/sites`, "POST",
+      { name: candidateName.trim(), latitude: point.latitude, longitude: point.longitude });
+    unlockNewSite(site.id);
+    await reload();
+    setSelected({ projectId: currentProject.id, siteId: site.id });
+    setProbePoint(null);
+    setHiddenProjects(current => current.filter(id => id !== currentProject.id));
+    focusMap(point);
+  }
   const filtered = projects.filter(
     (project) =>
       project.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -550,6 +600,7 @@ function App() {
           "POST",
           { name: name.trim() },
         );
+        unlockNewSite(site.id);
         setSelected({ projectId: dialog.target.projectId, siteId: site.id });
         setExpanded((old) => [...new Set([...old, dialog.target!.projectId])]);
       } else if (dialog.action === "rename" && dialog.target) {
@@ -608,6 +659,10 @@ function App() {
     projectId: string,
     changes: MissionChanges,
   ) {
+    if ((changes.center_latitude !== undefined || changes.center_longitude !== undefined || changes.radius_m !== undefined) &&
+      projects.find(project => project.id === projectId)?.sites.some(site => !unlockedSites.includes(site.id))) {
+      throw new Error("Unlock all landing sites to edit this search region.");
+    }
     await request(`/api/projects/${projectId}`, "PATCH", changes);
     await reload();
   }
@@ -631,6 +686,7 @@ function App() {
       await request(`/api/projects/${project.id}`, "DELETE").catch(() => {});
       throw reason;
     }
+    unlockNewSite(site.id);
     await reload();
     setSelected({ projectId: project.id, siteId: site.id });
     setProbePoint(null);
@@ -649,6 +705,15 @@ function App() {
       <div className="orbis-scroll min-h-0 flex-1 overflow-auto" onClick={event => {
         if (event.target === event.currentTarget) { setSelected(null); setProbePoint(null); setMenu(null); }
       }}>
+        {filtered.length === 0 && <div className="flex flex-col items-center px-4 pt-12 text-center text-xs leading-relaxed text-[#b9c3c8]">
+          <Folder size={24} className="text-accent" />
+          <p className="mt-3 font-medium text-white">{projects.length ? "No matching projects" : "No projects yet"}</p>
+          <p className="mt-1 min-h-[3.75rem]">{projects.length ? "Try another search term." : "Create a project to start planning landing sites."}</p>
+          <button type="button" onClick={() => projects.length ? setSearch("") : openDialog("project")}
+            className="mt-4 min-h-9 bg-accent px-3 font-medium text-white transition-[filter] hover:brightness-90">
+            {projects.length ? "Clear search" : "Create project"}
+          </button>
+        </div>}
         {filtered.map((project) => {
           const expandedNow = expanded.includes(project.id) || !!search;
           const isHidden = hiddenProjects.includes(project.id);
@@ -756,7 +821,7 @@ function App() {
                         title={unlockedSites.includes(site.id) ? "Lock site position" : "Unlock site position"}
                         onClick={() => setUnlockedSites(current => current.includes(site.id)
                           ? current.filter(id => id !== site.id) : [...current, site.id])}
-                        className={`flex h-8 w-8 shrink-0 items-center justify-center hover:bg-[#484848] ${unlockedSites.includes(site.id) ? "text-[#03ace4]" : "text-[#aaa]"}`}>
+                        className={`flex h-8 w-8 shrink-0 items-center justify-center hover:bg-[#484848] ${unlockedSites.includes(site.id) ? "text-accent" : "text-[#aaa]"}`}>
                         {unlockedSites.includes(site.id) ? <LockOpen size={15} /> : <Lock size={15} />}
                       </button>
                       <IconButton
@@ -821,7 +886,28 @@ function App() {
           </button>
         </span>
       </div>
-      {currentSite && currentProject ? (
+      {probePoint && currentProject && workspace === "map" ? (
+        <div className="space-y-3 p-3 text-xs">
+          <div className="font-medium text-white">Inspected point</div>
+          <div className="font-mono text-[#b9c3c8]">{probePoint.latitude.toFixed(6)}°, {probePoint.longitude.toFixed(6)}°</div>
+          <label className="block text-[#aaa]">Candidate site name
+            <input type="text" maxLength={100} value={probeCandidateName}
+              onChange={event => setProbeCandidateName(event.target.value)}
+              className="mt-1 w-full border border-[#555] bg-[#292929] p-2 text-white outline-none focus:border-accent" />
+          </label>
+          <button type="button" disabled={probeSaving} onClick={() => {
+            setProbeSaving(true);
+            setProbeSaveError("");
+            void saveInspectedPoint(probeCandidateName, probePoint)
+              .catch(reason => setProbeSaveError(reason instanceof Error ? reason.message : "Could not save this point."))
+              .finally(() => setProbeSaving(false));
+          }} className="w-full bg-accent px-3 py-2 text-left font-medium text-white transition-[filter] hover:brightness-90 disabled:opacity-50">
+            {probeSaving ? "Saving…" : "Save as candidate site"}
+          </button>
+          {probeSaveError && <p role="alert" className="text-[#ef9292]">{probeSaveError}</p>}
+          <button type="button" onClick={() => setProbePoint(null)} className="text-[#aeb8bd] hover:text-white">Clear inspected point</button>
+        </div>
+      ) : currentSite && currentProject ? (
         <div className="space-y-3 p-3">
           <p className="break-words text-xs font-medium">{currentSite.name}</p>
           {!unlockedSites.includes(currentSite.id) && <p className="text-[11px] text-[#aaa]">Site position locked. Unlock it in Browse to move or edit coordinates.</p>}
@@ -830,7 +916,7 @@ function App() {
           <Coordinate key={`${currentSite.id}-lon`} label="Longitude" value={currentSite.longitude}
             disabled={!unlockedSites.includes(currentSite.id)} save={value => saveCoordinate("longitude", value)} />
           <button type="button" onClick={() => { setWorkspace("analysis"); setDrawer(null); }}
-            className="w-full bg-[#03ace4] px-3 py-2 text-left text-xs font-medium text-white hover:bg-[#079bc9]">
+            className="w-full bg-accent px-3 py-2 text-left text-xs font-medium text-white transition-[filter] hover:brightness-90">
             Open Mission Analysis
           </button>
           <p className="text-[11px] text-[#999]">Click the map to move this landing site, or drag its marker.</p>
@@ -839,13 +925,15 @@ function App() {
         <MissionSettings
           key={currentProject.id}
           project={currentProject}
+          regionLocked={currentProject.sites.some(site => !unlockedSites.includes(site.id))}
           save={(changes) => saveMissionSettings(currentProject.id, changes)}
         />
-      ) : <div className="flex min-h-0 flex-1 flex-col items-center px-5 pt-12 text-center text-xs leading-relaxed text-[#b9c3c8] sm:pt-16">
-        <p className="font-medium text-[#edf1f2]">Nothing selected</p>
-        <p className="mt-2 max-w-52">Select a project or landing site in Browse to inspect its coordinates and mission settings.</p>
+      ) : <div className="flex min-h-0 flex-1 flex-col items-center px-4 pt-12 text-center text-xs leading-relaxed text-[#b9c3c8]">
+        <MousePointer2 size={24} className="shrink-0 text-accent" />
+        <p className="mt-3 font-medium text-[#edf1f2]">Nothing selected</p>
+        <p className="mt-1 min-h-[3.75rem]">Select a project or landing site in Browse to inspect its coordinates and mission settings.</p>
         <button type="button" onClick={() => { setWorkspace("explore"); setProbePoint(null); setDrawer(null); }}
-          className="mt-5 min-h-9 border border-[#57899b] px-3 font-medium text-[#8dd3eb] hover:bg-[#34454b] hover:text-white">Explore candidate areas</button>
+          className="mt-4 min-h-9 bg-accent px-3 font-medium text-white transition-[filter] hover:brightness-90">Explore candidate areas</button>
       </div>}
     </>
   );
@@ -859,6 +947,11 @@ function App() {
     regions={workspace === "explore" ? regions?.projectId === null ? regions : null : regions?.projectId ? regions : null}
     exploreArea={workspace === "explore" ? exploreArea : null}
     probePoint={workspace === "explore" ? null : probePoint}
+    onOpenProbe={() => {
+      if (window.matchMedia("(min-width: 1024px)").matches) setInspectorOpen(true);
+      else setDrawer("inspector");
+    }}
+    focusRequest={mapFocus}
     probeMode={probeMode}
     onProbePoint={point => {
       if (workspace === "explore") {
@@ -869,6 +962,9 @@ function App() {
     }}
     onMoveProjectCenter={async (projectId, lat, lon) => {
       await saveMissionSettings(projectId, { center_latitude: lat, center_longitude: lon });
+    }}
+    onResizeProject={async (projectId, radius) => {
+      await saveMissionSettings(projectId, { radius_m: radius });
     }}
     onMoveExploreArea={(latitude, longitude) => {
       setExploreArea(current => ({ ...current, latitude, longitude }));
@@ -989,7 +1085,8 @@ function App() {
                 latitude={probePoint?.latitude ?? currentSite!.latitude}
                 longitude={probePoint?.longitude ?? currentSite!.longitude}
                 arrivalUtc={currentProject.arrival_utc} durationHours={currentProject.duration_hours}
-                siteName={probePoint ? "Inspected point" : currentSite!.name} map={mapView} />
+                siteName={probePoint ? "Inspected point" : currentSite!.name} map={mapView}
+                elapsedHours={selectedMissionHours} onElapsedChange={setSelectedMissionHours} />
             ) : mapView}
             secondary={workspace === "statistics" && currentProject ? (
               <div className="orbis-scroll h-full overflow-y-auto overscroll-contain bg-[#252525] p-2.5 sm:p-3">
@@ -997,16 +1094,21 @@ function App() {
                   latitude={currentSite?.latitude ?? currentProject.center_latitude}
                   longitude={currentSite?.longitude ?? currentProject.center_longitude}
                   arrivalUtc={currentProject.arrival_utc} durationHours={currentProject.duration_hours}
-                  project={currentProject} probePoint={probePoint}
-                  onSelectSite={siteId => { setSelected({ projectId: currentProject.id, siteId }); setProbePoint(null); }}
-                  onSaveCandidate={async (candidateName, point) => {
-                    const site = await request<Site>(`/api/projects/${currentProject.id}/sites`, "POST",
-                      { name: candidateName, latitude: point.latitude, longitude: point.longitude });
-                    setSelected({ projectId: currentProject.id, siteId: site.id });
+                  siteName={currentSite?.name ?? "Search center"} project={currentProject} probePoint={probePoint}
+                  elapsedHours={selectedMissionHours} onElapsedChange={setSelectedMissionHours}
+                  onSelectSite={siteId => {
+                    const site = currentProject.sites.find(item => item.id === siteId);
+                    setSelected({ projectId: currentProject.id, siteId });
                     setProbePoint(null);
-                    void reload().catch(() => {});
+                    setHiddenProjects(current => current.filter(id => id !== currentProject.id));
+                    if (site) focusMap(site);
                   }}
-                  onProbePoint={point => { setProbePoint(point); setProbeMode(false); }}
+                  onSaveCandidate={saveInspectedPoint}
+                  onProbePoint={point => {
+                    setProbePoint(point);
+                    setProbeMode(false);
+                    if (point) focusMap(point);
+                  }}
                   onProbeMode={enabled => { setWorkspace("map"); setProbeMode(enabled); }}
                   onSaveMission={changes => saveMissionSettings(currentProject.id, changes)}
                   onRegions={(projectId, areas, grid, spacing) => setRegions({ projectId, areas, grid, spacing })} />
@@ -1019,11 +1121,11 @@ function App() {
                     <button type="button" id="explore-candidates-tab" role="tab" aria-controls="explore-candidates-panel" aria-selected={exploreMode === "candidates"}
                       onClick={() => setExploreMode("candidates")}
                       onKeyDown={event => { if (event.key === "ArrowRight") { setExploreMode("resilience"); document.getElementById("explore-resilience-tab")?.focus(); } }}
-                      className={`min-w-0 min-h-11 border-b-2 border-r border-r-[#444] px-2 text-[11px] sm:px-3 sm:text-xs ${exploreMode === "candidates" ? "border-b-[#03ace4] bg-[#303b40] text-white" : "border-b-transparent text-[#bbb] hover:bg-[#383838]"}`}>Candidate search</button>
+                      className={`min-w-0 min-h-11 border-b-2 border-r border-r-[#444] px-2 text-[11px] sm:px-3 sm:text-xs ${exploreMode === "candidates" ? "border-b-accent bg-[#303b40] text-white" : "border-b-transparent text-[#bbb] hover:bg-[#383838]"}`}>Candidate search</button>
                     <button type="button" id="explore-resilience-tab" role="tab" aria-controls="explore-resilience-panel" aria-selected={exploreMode === "resilience"}
                       onClick={() => setExploreMode("resilience")}
                       onKeyDown={event => { if (event.key === "ArrowLeft") { setExploreMode("candidates"); document.getElementById("explore-candidates-tab")?.focus(); } }}
-                      className={`min-w-0 min-h-11 border-b-2 px-2 text-[11px] sm:px-3 sm:text-xs ${exploreMode === "resilience" ? "border-b-[#03ace4] bg-[#303b40] text-white" : "border-b-transparent text-[#bbb] hover:bg-[#383838]"}`}>Resilience explorer</button>
+                      className={`min-w-0 min-h-11 border-b-2 px-2 text-[11px] sm:px-3 sm:text-xs ${exploreMode === "resilience" ? "border-b-accent bg-[#303b40] text-white" : "border-b-transparent text-[#bbb] hover:bg-[#383838]"}`}>Resilience explorer</button>
                   </div>
                 </div>
                 <div id="explore-candidates-panel" role="tabpanel" aria-labelledby="explore-candidates-tab" hidden={exploreMode !== "candidates"}>
