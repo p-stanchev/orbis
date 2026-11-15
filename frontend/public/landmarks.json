@@ -73,17 +73,17 @@
       "highlight": "A natural cold trap",
       "description": "Haworth lies in the Moon’s dark south-polar landscape, where some ground can remain without direct sunlight for extremely long periods. Those cold, shaded areas are interesting because they may hold ice and other frozen materials.",
       "image": {
-        "url": null,
-        "source_page_url": "https://commons.wikimedia.org/wiki/File:Haworth_crater.jpg",
-        "credit": "NASA; cropped derivative hosted by Wikimedia Commons",
-        "alt": "Lunar south pole imagery showing Haworth",
-        "download_url": "https://upload.wikimedia.org/wikipedia/commons/d/d9/Haworth_crater.jpg",
+        "url": "/landmarks/haworth.jpg",
+        "source_page_url": "https://svs.gsfc.nasa.gov/3686",
+        "credit": "NASA/Goddard Space Flight Center Scientific Visualization Studio",
+        "alt": "LRO/LOLA visualization of the lunar south pole including Haworth crater",
+        "download_url": "https://svs.gsfc.nasa.gov/vis/a000000/a003600/a003686/SPflyover_v07_still.2320.jpg",
         "suggested_filename": "haworth.jpg",
-        "subject_note": "Cropped NASA image of Haworth crater; small original image (356 × 534 px)"
+        "subject_note": "Regional terrain visualization including Haworth, not a dedicated crater photograph"
       },
       "sources": {
         "coordinates": "https://planetarynames.wr.usgs.gov/Feature/14502",
-        "description": "https://commons.wikimedia.org/wiki/File:Haworth_crater.jpg"
+        "description": "https://svs.gsfc.nasa.gov/3686"
       }
     },
     {

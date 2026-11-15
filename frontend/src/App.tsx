@@ -356,12 +356,23 @@ function App() {
   const [search, setSearch] = useState("");
   const [utc, setUtc] = useState("");
   const [drawer, setDrawer] = useState<"browse" | "inspector" | null>(null);
+  const [displayedDrawer, setDisplayedDrawer] = useState<"browse" | "inspector" | null>(null);
   const [dialog, setDialog] = useState<Dialog>(null);
   const [name, setName] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [menu, setMenu] = useState<Target | null>(null);
   const [deleting, setDeleting] = useState<Target | null>(null);
+
+  useEffect(() => {
+    if (drawer) {
+      setDisplayedDrawer(drawer);
+      return;
+    }
+    if (!displayedDrawer) return;
+    const timeout = window.setTimeout(() => setDisplayedDrawer(null), 300);
+    return () => window.clearTimeout(timeout);
+  }, [drawer, displayedDrawer]);
 
   useEffect(() => {
     localStorage.setItem(VISIBILITY_KEY, JSON.stringify(hiddenProjects));
@@ -838,6 +849,7 @@ function App() {
   );
 
   const mapView = <LunarMap
+    landmarksEnabled={workspace === "map"}
     projects={projects}
     hiddenProjectIds={hiddenProjects}
     unlockedSiteIds={unlockedSites}
@@ -1031,16 +1043,16 @@ function App() {
         </aside>
       </div>
 
-      {drawer && (
+      {(drawer || displayedDrawer) && (
         <div
-          className="fixed inset-0 z-40 flex bg-black/60"
+          className={`orbis-drawer-backdrop fixed inset-0 z-40 flex bg-black/60 ${drawer ? "" : "orbis-drawer-backdrop-out pointer-events-none"}`}
           onClick={() => setDrawer(null)}
         >
           <aside
-            className={`flex h-full w-[min(85vw,320px)] flex-col bg-[#3b3b3b] ${drawer === "inspector" ? "ml-auto border-l border-[#555]" : "border-r border-[#555]"}`}
+            className={`flex h-full w-[min(85vw,320px)] flex-col bg-[#3b3b3b] ${(drawer ?? displayedDrawer) === "inspector" ? "orbis-drawer-right ml-auto border-l border-[#555]" : "orbis-drawer-left border-r border-[#555]"} ${drawer ? "" : "orbis-drawer-out"}`}
             onClick={(event) => event.stopPropagation()}
           >
-            {drawer === "browse" ? browse : inspector}
+            {(drawer ?? displayedDrawer) === "browse" ? browse : inspector}
           </aside>
         </div>
       )}

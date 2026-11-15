@@ -64,16 +64,18 @@ Candidate areas are visibility estimates, not confirmed safe landing sites. Sun 
 
 ORBIS includes a curated dataset of ten named features near the lunar south pole in [`frontend/public/landmarks.json`](frontend/public/landmarks.json). The entries include official feature-center coordinates, feature types, approximate diameters, and brief educational descriptions. A landmark's named center is **not** a recommended landing location.
 
+Turn on Landmarks beside PSR to see pink outlines for the approximate feature diameters. Clicking a landmark or using the tour arrows moves the map to that feature. Outlines show catalog diameters, not surveyed feature boundaries.
+
 - **Names, coordinates, types, and diameters:** [USGS Gazetteer of Planetary Nomenclature — The Moon](https://planetarynames.wr.usgs.gov/Page/MOON/target). The Gazetteer publishes IAU-approved feature names and lunar coordinate information.
 - **Scientific context and imagery:** NASA's [Lunar South Pole Terrain in Coded Color](https://svs.gsfc.nasa.gov/5127), the [Lunar Reconnaissance Orbiter Camera (LROC)](https://lroc.im-ldi.com/), and NASA's [Scientific Visualization Studio](https://svs.gsfc.nasa.gov/).
 - **Descriptions:** Short ORBIS-written summaries based on the cited material; they are not verbatim NASA descriptions or official NASA assessments.
-- **Images:** The `image.source_page_url` field links to the original media/reference page. The `image.url` field is `null` until a suitable image is downloaded, reviewed, and credited. To serve local images, save them as `frontend/public/landmarks/<id>.webp` and set `image.url` to `/landmarks/<id>.webp`.
+- **Images:** Landmark images are served from `frontend/public/landmarks/`. Each entry links to its original media page and records its credit and image subject. The viewer uses `image.url` when set, or the local `image.suggested_filename`; a missing file shows a placeholder.
 
 | Featured landmark | Official feature record | Media / scientific reference |
 |---|---|---|
 | Shackleton | [USGS](https://planetarynames.wr.usgs.gov/Feature/5450) | [NASA SVS — Visualizing Shackleton](https://svs.gsfc.nasa.gov/4716) |
 | de Gerlache | [USGS](https://planetarynames.wr.usgs.gov/Feature/1439) | [LROC — Shackleton–de Gerlache Ridge](https://lroc.im-ldi.com/images/1247) |
-| Haworth | [USGS](https://planetarynames.wr.usgs.gov/Feature/14502) | [NASA SVS — South Pole Terrain](https://svs.gsfc.nasa.gov/5127) |
+| Haworth | [USGS](https://planetarynames.wr.usgs.gov/Feature/14502) | [NASA SVS — LRO/LOLA Lunar South Pole Flyover](https://svs.gsfc.nasa.gov/3686) |
 | Shoemaker | [USGS](https://planetarynames.wr.usgs.gov/Feature/5494) | [LROC — Permanently Shadowed Craters](https://lroc.im-ldi.com/images/1255) |
 | Faustini | [USGS](https://planetarynames.wr.usgs.gov/Feature/1919) | [LROC — Faustini PSR Atlas](https://lroc.im-ldi.com/atlases/psr/SP_871460_0840750) |
 | Cabeus | [USGS](https://planetarynames.wr.usgs.gov/Feature/953) | [NASA Science — Cabeus Crater](https://science.nasa.gov/image-detail/cabeus-crater-lro/) |

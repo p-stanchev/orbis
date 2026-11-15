@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type PointerEvent, type WheelEvent } from "react";
-import { Layers, LocateFixed, Minus, Plus, X } from "lucide-react";
+import { Layers, LocateFixed, MapPin, Minus, Plus, X } from "lucide-react";
 import type { SearchRegion, SearchGridCell } from "./VisibilityStatistics";
+import LandmarkCard, { type Landmark } from "./LandmarkCard";
 
 type Site = { id: string; name: string; latitude: number; longitude: number };
 type Project = {
@@ -13,6 +14,7 @@ type Info = { bounds: Bounds; pole: { x: number; y: number }; radius: number };
 type Marker = { id: string; u: number; v: number };
 type Point = { latitude: number; longitude: number; u: number; v: number };
 type Props = {
+  landmarksEnabled: boolean;
   projects: Project[];
   hiddenProjectIds: string[];
   unlockedSiteIds: string[];
@@ -42,7 +44,7 @@ type Gesture = {
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const MAP_HINT_KEY = "orbis-map-hint-dismissed-v1";
 
-export default function LunarMap({ projects, hiddenProjectIds, unlockedSiteIds, selected, regions, exploreArea, probePoint, probeMode, onProbePoint, onSelectSite, onMoveSite, onMoveProjectCenter, onMoveExploreArea }: Props) {
+export default function LunarMap({ landmarksEnabled, projects, hiddenProjectIds, unlockedSiteIds, selected, regions, exploreArea, probePoint, probeMode, onProbePoint, onSelectSite, onMoveSite, onMoveProjectCenter, onMoveExploreArea }: Props) {
   const viewport = useRef<HTMLDivElement>(null);
   const map = useRef<HTMLDivElement>(null);
   const pointers = useRef(new Map<number, Pointer>());
@@ -58,8 +60,15 @@ export default function LunarMap({ projects, hiddenProjectIds, unlockedSiteIds, 
   const [explorePreview, setExplorePreview] = useState<{ u: number; v: number } | null>(null);
   const [point, setPoint] = useState<Point | null>(null);
   const [shadows, setShadows] = useState(false);
+  const [landmarksVisible, setLandmarksVisible] = useState(false);
+  const [landmarks, setLandmarks] = useState<Landmark[]>([]);
+  const [landmarkMarkers, setLandmarkMarkers] = useState<Marker[]>([]);
+  const [activeLandmarkId, setActiveLandmarkId] = useState<string | null>(null);
+  const [landmarkCardOpen, setLandmarkCardOpen] = useState(false);
+  const [landmarkError, setLandmarkError] = useState("");
   const [zoom, setZoom] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [smoothFocus, setSmoothFocus] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [hintDismissed, setHintDismissed] = useState(() => {
@@ -72,6 +81,16 @@ export default function LunarMap({ projects, hiddenProjectIds, unlockedSiteIds, 
   const selectedLocked = !!selected?.siteId && !unlockedSiteIds.includes(selected.siteId);
   const side = Math.min(dimensions.width, dimensions.height);
   const regionPositions = new Map(regionMarkers.map(marker => [marker.id, marker]));
+  const landmarkPositions = new Map(landmarkMarkers.map(marker => [marker.id, marker]));
+  const activeLandmarkIndex = landmarks.findIndex(landmark => landmark.id === activeLandmarkId);
+  const activeLandmark = activeLandmarkIndex >= 0 ? landmarks[activeLandmarkIndex] : null;
+
+  useEffect(() => {
+    if (!landmarksEnabled) {
+      setLandmarkCardOpen(false);
+      setActiveLandmarkId(null);
+    }
+  }, [landmarksEnabled]);
 
   const siteList = projects.flatMap(project => [
     { id: `center:${project.id}`, latitude: project.center_latitude, longitude: project.center_longitude },
@@ -100,6 +119,31 @@ export default function LunarMap({ projects, hiddenProjectIds, unlockedSiteIds, 
       .catch(() => { if (active) setError("Could not load lunar terrain."); });
     return () => { active = false; };
   }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch("/landmarks.json", { signal: controller.signal })
+      .then(response => { if (!response.ok) throw new Error(); return response.json() as Promise<{ landmarks: Landmark[] }>; })
+      .then(catalog => {
+        if (!Array.isArray(catalog.landmarks)) throw new Error();
+        setLandmarks(catalog.landmarks.filter(landmark => landmark.id && Number.isFinite(landmark.latitude) &&
+          Number.isFinite(landmark.longitude)).sort((a, b) => a.tour_order - b.tour_order));
+      })
+      .catch(() => { if (!controller.signal.aborted) setLandmarkError("Could not load lunar landmarks."); });
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    if (!landmarks.length) return;
+    const controller = new AbortController();
+    fetch("/api/terrain/project", {
+      method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
+      body: JSON.stringify(landmarks.map(({ id, latitude, longitude }) => ({ id, latitude, longitude }))),
+    }).then(response => { if (!response.ok) throw new Error(); return response.json() as Promise<Marker[]>; })
+      .then(setLandmarkMarkers)
+      .catch(() => { if (!controller.signal.aborted) setLandmarkError("Could not position lunar landmarks."); });
+    return () => controller.abort();
+  }, [landmarks]);
 
   useEffect(() => {
     const element = viewport.current;
@@ -176,12 +220,13 @@ export default function LunarMap({ projects, hiddenProjectIds, unlockedSiteIds, 
   }
 
   function changeZoom(factor: number) {
+    setSmoothFocus(false);
     const next = clamp(zoom * factor, 1, 10);
     setZoom(next);
     setOffset(current => limitedOffset(current, next));
   }
 
-  function reset() { setZoom(1); setOffset({ x: 0, y: 0 }); }
+  function reset() { setSmoothFocus(false); setZoom(1); setOffset({ x: 0, y: 0 }); }
 
   function normalizedPoint(clientX: number, clientY: number) {
     if (!map.current || !info) return null;
@@ -258,6 +303,7 @@ export default function LunarMap({ projects, hiddenProjectIds, unlockedSiteIds, 
 
   function handlePointerDown(event: PointerEvent<HTMLDivElement>) {
     if (event.pointerType === "mouse" && event.button !== 0) return;
+    setSmoothFocus(false);
     event.currentTarget.setPointerCapture(event.pointerId);
     const pointer = { x: event.clientX, y: event.clientY };
     pointers.current.set(event.pointerId, pointer);
@@ -378,6 +424,39 @@ export default function LunarMap({ projects, hiddenProjectIds, unlockedSiteIds, 
     changeZoom(event.deltaY < 0 ? 1.15 : 1 / 1.15);
   }
 
+  function focusLandmark(id: string) {
+    if (!side) return;
+    const marker = landmarkPositions.get(id);
+    if (!marker) return;
+    const targetX = dimensions.width >= 640 ? dimensions.width * 0.7 : dimensions.width / 2;
+    const targetY = dimensions.width < 640 ? dimensions.height * 0.25 : dimensions.height / 2;
+    const neededX = Math.max(targetX / (side * marker.u), (dimensions.width - targetX) / (side * (1 - marker.u)));
+    const neededY = Math.max(targetY / (side * marker.v), (dimensions.height - targetY) / (side * (1 - marker.v)));
+    const nextZoom = clamp(Math.max(zoom, 2.5, neededX, neededY), 1, 10);
+    setSmoothFocus(true);
+    setZoom(nextZoom);
+    setOffset(limitedOffset({ x: targetX - dimensions.width / 2 + (0.5 - marker.u) * side * nextZoom,
+      y: targetY - dimensions.height / 2 + (0.5 - marker.v) * side * nextZoom }, nextZoom));
+  }
+
+  function tourLandmark(delta: number) {
+    if (activeLandmarkIndex < 0 || !landmarks.length) return;
+    const next = landmarks[(activeLandmarkIndex + delta + landmarks.length) % landmarks.length];
+    setActiveLandmarkId(next.id);
+    setLandmarkCardOpen(true);
+    focusLandmark(next.id);
+  }
+
+  function closeLandmarkCard() {
+    if (document.activeElement?.closest(".orbis-landmark-card")) {
+      const marker = [...(map.current?.querySelectorAll<HTMLButtonElement>("[data-landmark-id]") ?? [])]
+        .find(button => button.dataset.landmarkId === activeLandmarkId);
+      const toggle = viewport.current?.parentElement?.querySelector<HTMLButtonElement>('[aria-label="Toggle lunar landmarks"]');
+      (marker ?? toggle)?.focus({ preventScroll: true });
+    }
+    setLandmarkCardOpen(false);
+  }
+
   const ring = info ? {
     cx: (info.pole.x - info.bounds.left) / (info.bounds.right - info.bounds.left) * 100,
     cy: (info.bounds.top - info.pole.y) / (info.bounds.top - info.bounds.bottom) * 100,
@@ -386,7 +465,7 @@ export default function LunarMap({ projects, hiddenProjectIds, unlockedSiteIds, 
   } : null;
 
   return (
-    <div className="relative h-full w-full overflow-hidden bg-[#191919] text-[#ddd]">
+    <div className="@container relative h-full w-full overflow-hidden bg-[#191919] text-[#ddd]">
       <div
         ref={viewport}
         className="absolute inset-0 overflow-hidden"
@@ -406,9 +485,13 @@ export default function LunarMap({ projects, hiddenProjectIds, unlockedSiteIds, 
           <div
             ref={map}
             className="absolute left-1/2 top-1/2 select-none"
+            onTransitionEnd={event => {
+              if (event.target === event.currentTarget && event.propertyName === "transform") setSmoothFocus(false);
+            }}
             style={{
               width: side, height: side,
               transform: `translate(-50%, -50%) translate(${offset.x}px, ${offset.y}px) scale(${zoom})`,
+              transition: smoothFocus ? "transform 700ms cubic-bezier(0.22, 1, 0.36, 1)" : undefined,
             }}
           >
             <img src="/api/terrain/preview/hillshade?v=4" draggable={false} alt="NASA south-pole hillshade"
@@ -491,6 +574,29 @@ export default function LunarMap({ projects, hiddenProjectIds, unlockedSiteIds, 
                     backgroundColor: cell.status === "no_data" || cell.status === "slope_unchecked" ? "rgba(135,145,153,0.3)" : `rgba(${color},${opacity})`,
                     outline: cell.status === "recommended" ? `1px solid rgba(${color},0.8)` : "none" }} />;
               })}
+            {landmarksEnabled && landmarksVisible && landmarks.map(landmark => {
+              const position = landmarkPositions.get(landmark.id);
+              if (!position) return null;
+              const active = activeLandmarkId === landmark.id;
+              return <div key={landmark.id}>
+                {info && landmark.diameter_km && <div aria-hidden="true"
+                  className={`pointer-events-none absolute z-[7] rounded-full border bg-[#e78bb6]/[0.08] ${active ? "border-2 border-[#ffd1e2]" : "border-[#e78bb6]/80"}`}
+                  style={{ left: `${position.u * 100}%`, top: `${position.v * 100}%`,
+                    width: `${landmark.diameter_km * 1000 / (info.bounds.right - info.bounds.left) * 100}%`,
+                    height: `${landmark.diameter_km * 1000 / (info.bounds.top - info.bounds.bottom) * 100}%`,
+                    transform: "translate(-50%, -50%)" }} />}
+                <button type="button" data-landmark-id={landmark.id} aria-label={`Open ${landmark.name} landmark`}
+                  aria-pressed={active} title={landmark.name}
+                  onPointerDown={event => event.stopPropagation()}
+                  onPointerUp={event => event.stopPropagation()}
+                  onClick={event => { event.stopPropagation(); setActiveLandmarkId(landmark.id); setLandmarkCardOpen(true); focusLandmark(landmark.id); }}
+                  className="absolute z-[8] flex h-7 w-7 items-center justify-center"
+                  style={{ left: `${position.u * 100}%`, top: `${position.v * 100}%`,
+                    transform: `translate(-50%, -50%) scale(${1 / zoom})` }}>
+                  <span className={`pointer-events-none h-2.5 w-2.5 rounded-full border-2 border-[#e78bb6] bg-[#301b29] ${active ? "outline outline-2 outline-offset-2 outline-white" : ""}`} />
+                </button>
+              </div>;
+            })}
             {probeMarker && <span className="pointer-events-none absolute z-[12] h-4 w-4 rounded-full border-2 border-white bg-[#03ace4] shadow-[0_0_0_3px_#03ace477]"
               style={{ left: `${probeMarker.u * 100}%`, top: `${probeMarker.v * 100}%`,
                 transform: `translate(-50%, -50%) scale(${1 / zoom})` }} />}
@@ -526,22 +632,31 @@ export default function LunarMap({ projects, hiddenProjectIds, unlockedSiteIds, 
         )}
       </div>
 
-      <div className="pointer-events-none absolute left-2 top-2 z-20 bg-[#242424]/95 px-2 py-2 text-[10px] sm:left-3 sm:top-3 sm:px-3 sm:text-[11px]">
-        <span className="sm:hidden">SOUTH POLE</span><span className="hidden sm:inline">LUNAR SOUTH POLE <span className="ml-1 text-[#aaa]">80°S–90°S</span></span>
+      <div className="pointer-events-none absolute left-3 top-3 z-20 hidden bg-[#242424]/95 px-3 py-2 text-[11px] @min-[640px]:block">
+        LUNAR SOUTH POLE <span className="ml-1 text-[#aaa]">80°S–90°S</span>
       </div>
-      <div className="absolute right-2 top-2 z-20 flex gap-0.5 bg-[#242424]/95 p-1 sm:right-3 sm:top-3 sm:gap-1">
-        <button className={`flex h-8 items-center gap-1 px-2 text-xs ${shadows ? "bg-[#444] text-accent" : "text-[#aaa]"}`}
-          type="button" aria-label="Toggle permanent shadows" aria-pressed={shadows}
-          onClick={() => setShadows(!shadows)}><Layers size={15} /> PSR</button>
-        <button type="button" title="Zoom in" aria-label="Zoom in" className="p-2 hover:bg-[#444]" onClick={() => changeZoom(1.5)}><Plus size={15} /></button>
-        <button type="button" title="Zoom out" aria-label="Zoom out" className="p-2 hover:bg-[#444]" onClick={() => changeZoom(1 / 1.5)}><Minus size={15} /></button>
-        <button type="button" title="Reset view" aria-label="Reset view" className="p-2 hover:bg-[#444]" onClick={reset}><LocateFixed size={15} /></button>
-      </div>
-      {shadows && (
-        <div className="pointer-events-none absolute left-2 top-12 z-20 bg-[#242424]/95 px-2 py-1 text-[10px] sm:left-3 sm:top-14 sm:px-3 sm:py-2 sm:text-[11px]">
-          <span className="mr-2 inline-block h-2 w-2 bg-accent" />Permanently shadowed regions
+      <div className="absolute right-2 top-2 z-20 flex max-w-[calc(100%-16px)] flex-col items-start gap-1 sm:right-3 sm:top-3 sm:max-w-[calc(100%-24px)]">
+        <div className="flex max-w-full items-center gap-0.5 bg-[#242424]/95 p-1 sm:gap-1">
+          <button className={`flex h-8 shrink-0 items-center gap-1 px-2 text-xs ${shadows ? "bg-[#444] text-accent" : "text-[#aaa]"}`}
+            type="button" aria-label="Toggle permanent shadows" aria-pressed={shadows}
+            onClick={() => setShadows(!shadows)}><Layers size={15} /> PSR</button>
+          {landmarksEnabled && <button className={`flex h-8 shrink-0 items-center gap-1 px-2 text-xs ${landmarksVisible ? "bg-[#444] text-[#f0a5c7]" : "text-[#aaa]"}`}
+            type="button" aria-label="Toggle lunar landmarks" aria-pressed={landmarksVisible}
+            onClick={() => { setLandmarksVisible(current => !current); setActiveLandmarkId(null); setLandmarkCardOpen(false); }}><MapPin size={15} /> Landmarks</button>}
+          <button type="button" title="Zoom in" aria-label="Zoom in" className="shrink-0 p-2 hover:bg-[#444]" onClick={() => changeZoom(1.5)}><Plus size={15} /></button>
+          <button type="button" title="Zoom out" aria-label="Zoom out" className="shrink-0 p-2 hover:bg-[#444]" onClick={() => changeZoom(1 / 1.5)}><Minus size={15} /></button>
+          <button type="button" title="Reset view" aria-label="Reset view" className="shrink-0 p-2 hover:bg-[#444]" onClick={reset}><LocateFixed size={15} /></button>
         </div>
-      )}
+        {shadows && <div className="orbis-overlay-enter self-end bg-[#242424]/95 px-2 py-1 text-[10px] sm:text-[11px]">
+          <span className="mr-2 inline-block h-2 w-2 bg-accent" />Permanently shadowed regions
+        </div>}
+        {landmarksEnabled && landmarksVisible && landmarkError && <div role="alert" className="bg-[#292929] px-2 py-1 text-xs text-[#ef9292]">{landmarkError}</div>}
+      </div>
+      {landmarksEnabled && landmarksVisible && activeLandmark && <LandmarkCard landmark={activeLandmark}
+        open={landmarkCardOpen}
+        index={activeLandmarkIndex} total={landmarks.length}
+        onPrevious={() => tourLandmark(-1)} onNext={() => tourLandmark(1)}
+        onClose={closeLandmarkCard} />}
       {!hintDismissed && <div className="pointer-events-none absolute bottom-2 left-2 right-2 z-20 flex max-w-full items-center gap-2 bg-[#242424]/95 p-2 font-mono text-[10px] sm:bottom-3 sm:left-3 sm:right-auto sm:text-[11px]">
         <div className="min-w-0 flex-1 truncate">
           {probeMode ? <span>Tap terrain to inspect a point</span> : exploreArea ? <span>Tap terrain or drag the white circle to move the search area</span> : point ? <><div>LAT {point.latitude.toFixed(5)}°</div><div>LON {point.longitude.toFixed(5)}°</div></> :
