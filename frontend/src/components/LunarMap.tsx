@@ -15,6 +15,7 @@ type Point = { latitude: number; longitude: number; u: number; v: number };
 type Props = {
   projects: Project[];
   hiddenProjectIds: string[];
+  unlockedSiteIds: string[];
   selected: Target | null;
   regions: { projectId: string | null; areas: SearchRegion[]; grid: SearchGridCell[]; spacing: number } | null;
   exploreArea: { latitude: number; longitude: number; radius_m: number } | null;
@@ -41,7 +42,7 @@ type Gesture = {
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const MAP_HINT_KEY = "orbis-map-hint-dismissed-v1";
 
-export default function LunarMap({ projects, hiddenProjectIds, selected, regions, exploreArea, probePoint, probeMode, onProbePoint, onSelectSite, onMoveSite, onMoveProjectCenter, onMoveExploreArea }: Props) {
+export default function LunarMap({ projects, hiddenProjectIds, unlockedSiteIds, selected, regions, exploreArea, probePoint, probeMode, onProbePoint, onSelectSite, onMoveSite, onMoveProjectCenter, onMoveExploreArea }: Props) {
   const viewport = useRef<HTMLDivElement>(null);
   const map = useRef<HTMLDivElement>(null);
   const pointers = useRef(new Map<number, Pointer>());
@@ -68,6 +69,7 @@ export default function LunarMap({ projects, hiddenProjectIds, selected, regions
       return false;
     }
   });
+  const selectedLocked = !!selected?.siteId && !unlockedSiteIds.includes(selected.siteId);
   const side = Math.min(dimensions.width, dimensions.height);
   const regionPositions = new Map(regionMarkers.map(marker => [marker.id, marker]));
 
@@ -238,7 +240,7 @@ export default function LunarMap({ projects, hiddenProjectIds, selected, regions
   }
 
   async function place(target: Target | null, position: ReturnType<typeof normalizedPoint>) {
-    if (!position) return;
+    if (!position || (target?.siteId && !unlockedSiteIds.includes(target.siteId))) return;
     setSaving(true);
     setError("");
     try {
@@ -310,7 +312,7 @@ export default function LunarMap({ projects, hiddenProjectIds, selected, regions
       const location = constrainedPoint(now.x - gesture.current.exploreOffset.x,
         now.y - gesture.current.exploreOffset.y);
       if (location) setExplorePreview({ u: location.u, v: location.v });
-    } else if (gesture.current.marker) {
+    } else if (gesture.current.marker && (!gesture.current.marker.siteId || unlockedSiteIds.includes(gesture.current.marker.siteId))) {
       const location = withinSearchRadius(constrainedPoint(now.x, now.y), gesture.current.marker);
       const id = gesture.current.marker.siteId ?? `center:${gesture.current.marker.projectId}`;
       if (location) setPreview({ id, u: location.u, v: location.v });
@@ -360,14 +362,14 @@ export default function LunarMap({ projects, hiddenProjectIds, selected, regions
       return;
     }
 
-    if (current.marker && current.moved) {
+    if (current.marker && current.moved && (!current.marker.siteId || unlockedSiteIds.includes(current.marker.siteId))) {
       const location = withinSearchRadius(constrainedPoint(event.clientX, event.clientY), current.marker);
       onSelectSite(current.marker);
       void place(current.marker, location);
     } else if (current.marker && !current.moved) {
       const active = current.marker.projectId === selected?.projectId && current.marker.siteId === selected?.siteId;
       onSelectSite(active ? null : current.marker);
-    } else if (!current.moved && !current.marker && selected) {
+    } else if (!current.moved && !current.marker && selected && !selectedLocked) {
       void place(selected, withinSearchRadius(normalizedPoint(event.clientX, event.clientY), selected));
     }
   }
@@ -502,9 +504,9 @@ export default function LunarMap({ projects, hiddenProjectIds, selected, regions
                   key={site.id}
                   type="button"
                   data-site-id={site.id}
-                  aria-label={`Move or select ${site.name}`}
-                  title={`${site.name}: drag to move`}
-                  className="absolute z-10 flex h-7 w-7 cursor-grab items-center justify-center active:cursor-grabbing"
+                  aria-label={`${unlockedSiteIds.includes(site.id) ? "Move or select" : "Select"} ${site.name}`}
+                  title={`${site.name}: ${unlockedSiteIds.includes(site.id) ? "drag to move" : "locked; unlock in Browse to move"}`}
+                  className={`absolute z-10 flex h-7 w-7 items-center justify-center ${unlockedSiteIds.includes(site.id) ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"}`}
                   style={{
                     left: `${position.u * 100}%`, top: `${position.v * 100}%`,
                     transform: `translate(-50%, -50%) scale(${1 / zoom})`,
@@ -543,7 +545,7 @@ export default function LunarMap({ projects, hiddenProjectIds, selected, regions
       {!hintDismissed && <div className="pointer-events-none absolute bottom-2 left-2 right-2 z-20 flex max-w-full items-center gap-2 bg-[#242424]/95 p-2 font-mono text-[10px] sm:bottom-3 sm:left-3 sm:right-auto sm:text-[11px]">
         <div className="min-w-0 flex-1 truncate">
           {probeMode ? <span>Tap terrain to inspect a point</span> : exploreArea ? <span>Tap terrain or drag the white circle to move the search area</span> : point ? <><div>LAT {point.latitude.toFixed(5)}°</div><div>LON {point.longitude.toFixed(5)}°</div></> :
-            <span className="text-[#aaa]">{selected?.siteId ? "Click terrain to move selected site" : "Select a site to place it"}</span>}
+            <span className="text-[#aaa]">{selectedLocked ? "Unlock site in Browse to move it" : selected?.siteId ? "Click terrain to move selected site" : selected ? "Click terrain to move search center" : "Select a site or project center"}</span>}
         </div>
         <button type="button" onClick={dismissHint} aria-label="Dismiss map hint permanently" title="Hide map hint in this browser"
           className="pointer-events-auto shrink-0 p-1 text-[#aaa] hover:text-white"><X size={14} /></button>

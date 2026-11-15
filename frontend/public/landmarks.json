@@ -1,0 +1,266 @@
+{
+  "version": 1,
+  "title": "ORBIS Lunar South Pole Landmarks",
+  "description": "Ten featured IAU-named lunar features between 80 and 90 degrees south.",
+  "coordinate_system": {
+    "body": "Moon",
+    "latitude": "planetographic degrees, positive north",
+    "longitude": "degrees east, range -180 to 180",
+    "positions": "Named feature center points; not recommended landing coordinates",
+    "note": "Official feature centers and diameters can vary between USGS control networks. Values are from the cited USGS Gazetteer records."
+  },
+  "image_note": "Download the image.download_url (or use its source_page_url), save it in frontend/public/landmarks/ with the suggested_filename, and then set image.url to /landmarks/<suggested_filename>. Some images are regional views or visualizations, not close-up photographs of the named feature; see image.subject_note.",
+  "landmarks": [
+    {
+      "id": "shackleton",
+      "name": "Shackleton",
+      "type": "crater",
+      "latitude": -89.67,
+      "longitude": 129.78,
+      "diameter_km": 20.92,
+      "featured": true,
+      "tour_order": 1,
+      "highlight": "Sunlight on the rim, darkness inside",
+      "description": "Just a few kilometers from the south pole, Shackleton is a crater of extremes. Parts of its rim get long stretches of sunlight, but the floor stays in permanent shadow—exactly the contrast that makes this area so interesting to mission planners.",
+      "image": {
+        "url": null,
+        "source_page_url": "https://svs.gsfc.nasa.gov/4716",
+        "credit": "NASA Scientific Visualization Studio / Ernie Wright",
+        "alt": "Lunar south pole imagery showing Shackleton",
+        "download_url": "https://svs.gsfc.nasa.gov/vis/a000000/a004700/a004716/shackleton_print.jpg",
+        "suggested_filename": "shackleton.jpg",
+        "subject_note": "Dedicated CGI terrain visualization of Shackleton crater; not a spacecraft photograph"
+      },
+      "sources": {
+        "coordinates": "https://planetarynames.wr.usgs.gov/Feature/5450",
+        "description": "https://svs.gsfc.nasa.gov/4716"
+      }
+    },
+    {
+      "id": "de-gerlache",
+      "name": "de Gerlache",
+      "type": "crater",
+      "latitude": -88.48,
+      "longitude": -88.34,
+      "diameter_km": 32.71,
+      "featured": true,
+      "tour_order": 2,
+      "highlight": "A ridge worth exploring",
+      "description": "De Gerlache sits close to Shackleton, with a long ridge linking their neighborhood. That ridge has attracted attention because its high ground may offer better access to sunlight while keeping the shadowed polar craters within reach.",
+      "image": {
+        "url": null,
+        "source_page_url": "https://lroc.im-ldi.com/images/1247",
+        "credit": "NASA/GSFC/Arizona State University (LROC)",
+        "alt": "Lunar south pole imagery showing de Gerlache",
+        "download_url": "https://lroc.im-ldi.com/ckeditor_assets/pictures/1130/content_M1348682369_LRmos.warp.str01.shrunk6x.1100x1100.png",
+        "suggested_filename": "de-gerlache.png",
+        "subject_note": "LROC oblique image of the Shackleton–de Gerlache ridge; not a centered view of de Gerlache crater"
+      },
+      "sources": {
+        "coordinates": "https://planetarynames.wr.usgs.gov/Feature/1439",
+        "description": "https://lroc.im-ldi.com/images/1247"
+      }
+    },
+    {
+      "id": "haworth",
+      "name": "Haworth",
+      "type": "crater",
+      "latitude": -86.9,
+      "longitude": -4.0,
+      "diameter_km": 35.0,
+      "featured": true,
+      "tour_order": 3,
+      "highlight": "A natural cold trap",
+      "description": "Haworth lies in the Moon’s dark south-polar landscape, where some ground can remain without direct sunlight for extremely long periods. Those cold, shaded areas are interesting because they may hold ice and other frozen materials.",
+      "image": {
+        "url": null,
+        "source_page_url": "https://commons.wikimedia.org/wiki/File:Haworth_crater.jpg",
+        "credit": "NASA; cropped derivative hosted by Wikimedia Commons",
+        "alt": "Lunar south pole imagery showing Haworth",
+        "download_url": "https://upload.wikimedia.org/wikipedia/commons/d/d9/Haworth_crater.jpg",
+        "suggested_filename": "haworth.jpg",
+        "subject_note": "Cropped NASA image of Haworth crater; small original image (356 × 534 px)"
+      },
+      "sources": {
+        "coordinates": "https://planetarynames.wr.usgs.gov/Feature/14502",
+        "description": "https://commons.wikimedia.org/wiki/File:Haworth_crater.jpg"
+      }
+    },
+    {
+      "id": "shoemaker",
+      "name": "Shoemaker",
+      "type": "crater",
+      "latitude": -88.14,
+      "longitude": 45.91,
+      "diameter_km": 51.82,
+      "featured": true,
+      "tour_order": 4,
+      "highlight": "A crater hidden from the Sun",
+      "description": "Shoemaker is one of the large craters near the south pole with a deeply shadowed interior. LRO images help scientists study what its walls and floor look like, even though spotting water ice from imagery alone is difficult.",
+      "image": {
+        "url": null,
+        "source_page_url": "https://svs.gsfc.nasa.gov/5127",
+        "credit": "NASA Scientific Visualization Studio / Ernie Wright",
+        "alt": "Lunar south pole imagery showing Shoemaker",
+        "download_url": "https://svs.gsfc.nasa.gov/vis/a000000/a005100/a005127/lola_sp_still_print.jpg",
+        "suggested_filename": "shoemaker.jpg",
+        "subject_note": "Labeled regional NASA LOLA terrain visualization; Shoemaker is one of multiple named craters visible"
+      },
+      "sources": {
+        "coordinates": "https://planetarynames.wr.usgs.gov/Feature/5494",
+        "description": "https://svs.gsfc.nasa.gov/5127"
+      }
+    },
+    {
+      "id": "faustini",
+      "name": "Faustini",
+      "type": "crater",
+      "latitude": -87.18,
+      "longitude": 84.31,
+      "diameter_km": 42.48,
+      "featured": true,
+      "tour_order": 5,
+      "highlight": "Cold enough to preserve ice",
+      "description": "Faustini is another south-polar crater where deep shadows keep the ground exceptionally cold. Scientists study places like this because frozen water and other volatile materials can survive where direct sunlight never reaches.",
+      "image": {
+        "url": null,
+        "source_page_url": "https://data.lroc.im-ldi.com/lroc/view_rdr/NAC_ROI_FAUSTINILOF",
+        "credit": "NASA/GSFC/Arizona State University (LROC NAC)",
+        "alt": "Lunar south pole imagery showing Faustini",
+        "download_url": "https://pds.lroc.im-ldi.com/data/LRO-L-LROC-5-RDR-V1.0/LROLRC_2001/EXTRAS/BROWSE/NAC_ROI/FAUSTINILOF/NAC_ROI_FAUSTINILOF_P878S0900.BROWSE.PNG",
+        "suggested_filename": "faustini.png",
+        "subject_note": "LROC low-Sun image mosaic of the Faustini Rim A region, not a full-crater portrait; archive link may redirect"
+      },
+      "sources": {
+        "coordinates": "https://planetarynames.wr.usgs.gov/Feature/1919",
+        "description": "https://data.lroc.im-ldi.com/lroc/view_rdr/NAC_ROI_FAUSTINILOF"
+      }
+    },
+    {
+      "id": "cabeus",
+      "name": "Cabeus",
+      "type": "crater",
+      "latitude": -85.33,
+      "longitude": -42.13,
+      "diameter_km": 100.58,
+      "featured": true,
+      "tour_order": 6,
+      "highlight": "Where LCROSS found water",
+      "description": "Cabeus made lunar headlines in 2009. NASA deliberately sent the LCROSS impactor into a shadowed part of this crater, then studied the debris cloud and found evidence of water in the lunar material.",
+      "image": {
+        "url": null,
+        "source_page_url": "https://science.nasa.gov/image-detail/cabeus-crater-lro/",
+        "credit": "NASA/GSFC/Arizona State University (LROC)",
+        "alt": "Lunar south pole imagery showing Cabeus",
+        "download_url": "https://science.nasa.gov/wp-content/uploads/2024/09/cabeus-crater-lro.png",
+        "suggested_filename": "cabeus.png",
+        "subject_note": "Real LRO oblique image looking across the north rim of Cabeus crater"
+      },
+      "sources": {
+        "coordinates": "https://planetarynames.wr.usgs.gov/Feature/953",
+        "description": "https://science.nasa.gov/image-detail/cabeus-crater-lro/"
+      }
+    },
+    {
+      "id": "sverdrup",
+      "name": "Sverdrup",
+      "type": "crater",
+      "latitude": -88.32,
+      "longitude": -153.39,
+      "diameter_km": 32.83,
+      "featured": true,
+      "tour_order": 7,
+      "highlight": "A challenging polar neighborhood",
+      "description": "Sverdrup is tucked into the crowded, cratered landscape close to the south pole. Its location shows why a few kilometers can matter so much here: nearby ridges and crater walls can change how much of the sky a lander can see.",
+      "image": {
+        "url": null,
+        "source_page_url": "https://svs.gsfc.nasa.gov/5127",
+        "credit": "NASA Scientific Visualization Studio / Ernie Wright",
+        "alt": "Lunar south pole imagery showing Sverdrup",
+        "download_url": "https://svs.gsfc.nasa.gov/vis/a000000/a005100/a005127/lola_sp_still_print.jpg",
+        "suggested_filename": "sverdrup.jpg",
+        "subject_note": "Labeled regional NASA LOLA terrain visualization; Sverdrup is one of multiple named craters visible"
+      },
+      "sources": {
+        "coordinates": "https://planetarynames.wr.usgs.gov/Feature/5782",
+        "description": "https://svs.gsfc.nasa.gov/5127"
+      }
+    },
+    {
+      "id": "nobile",
+      "name": "Nobile",
+      "type": "crater",
+      "latitude": -85.28,
+      "longitude": 53.27,
+      "diameter_km": 79.27,
+      "featured": true,
+      "tour_order": 8,
+      "highlight": "Between high ground and deep shadow",
+      "description": "Nobile is a broad crater next to the high ground of Mons Mouton. NASA has studied this wider region for lunar rover exploration because sunlit slopes and permanently shaded terrain can lie surprisingly close together.",
+      "image": {
+        "url": null,
+        "source_page_url": "https://svs.gsfc.nasa.gov/5074",
+        "credit": "NASA Scientific Visualization Studio / Ernie Wright",
+        "alt": "Lunar south pole imagery showing Nobile",
+        "download_url": "https://svs.gsfc.nasa.gov/vis/a000000/a005000/a005074/tilt.0001_print.jpg",
+        "suggested_filename": "nobile.jpg",
+        "subject_note": "NASA 3D terrain visualization of Mons Mouton, with Nobile crater occupying the lower-right part of the scene"
+      },
+      "sources": {
+        "coordinates": "https://planetarynames.wr.usgs.gov/Feature/4321",
+        "description": "https://svs.gsfc.nasa.gov/5074"
+      }
+    },
+    {
+      "id": "amundsen",
+      "name": "Amundsen",
+      "type": "crater",
+      "latitude": -84.44,
+      "longitude": 83.07,
+      "diameter_km": 103.39,
+      "featured": true,
+      "tour_order": 9,
+      "highlight": "A giant crater near the pole",
+      "description": "More than 100 kilometers across, Amundsen is one of the giants of the lunar south-pole region. Its steep inner walls and central high ground stand out in spacecraft images and elevation maps.",
+      "image": {
+        "url": null,
+        "source_page_url": "https://svs.gsfc.nasa.gov/3866",
+        "credit": "NASA Scientific Visualization Studio",
+        "alt": "Lunar south pole imagery showing Amundsen",
+        "download_url": "https://svs.gsfc.nasa.gov/vis/a000000/a003800/a003866/amundsen.jpg",
+        "suggested_filename": "amundsen.jpg",
+        "subject_note": "NASA LRO-based terrain visualization featuring Amundsen crater; red line is a data/visualization overlay"
+      },
+      "sources": {
+        "coordinates": "https://planetarynames.wr.usgs.gov/Feature/247",
+        "description": "https://svs.gsfc.nasa.gov/3866"
+      }
+    },
+    {
+      "id": "mons-mouton",
+      "name": "Mons Mouton",
+      "type": "mountain",
+      "latitude": -84.6,
+      "longitude": 31.0,
+      "diameter_km": 130.0,
+      "featured": true,
+      "tour_order": 10,
+      "highlight": "A high plateau named for a NASA pioneer",
+      "description": "Mons Mouton looks less like a pointed mountain and more like a huge, crater-covered plateau. Named after NASA mathematician and programmer Melba Roy Mouton, it stands high above nearby terrain and has been studied for polar exploration.",
+      "image": {
+        "url": null,
+        "source_page_url": "https://svs.gsfc.nasa.gov/5074",
+        "credit": "NASA Scientific Visualization Studio / Ernie Wright",
+        "alt": "Lunar south pole imagery showing Mons Mouton",
+        "download_url": "https://svs.gsfc.nasa.gov/vis/a000000/a005000/a005074/nadir.0001_print.jpg",
+        "suggested_filename": "mons-mouton.jpg",
+        "subject_note": "Dedicated CGI aerial terrain visualization of Mons Mouton, not a spacecraft photograph"
+      },
+      "sources": {
+        "coordinates": "https://planetarynames.wr.usgs.gov/Feature/16070",
+        "description": "https://svs.gsfc.nasa.gov/5074"
+      }
+    }
+  ],
+  "description_note": "Descriptions are original, plain-language ORBIS summaries grounded in the linked NASA, LROC, and USGS material; they are not verbatim NASA text."
+}

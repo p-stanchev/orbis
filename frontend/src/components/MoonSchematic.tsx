@@ -127,18 +127,21 @@ export default function MoonSchematic({ orbit, ephemeris, siteLabel, error }: {
     <div className="space-y-1 border-t border-[#3e4448] px-3 py-2 text-[10px] text-[#aeb8bd]">
       {error ? <span role="alert" className="text-[#ef9292]">{error}</span> : <>
         <div className="flex flex-wrap gap-x-4 gap-y-1">
-          {orbit && <span>Earth–Moon {Math.round(orbit.moon_distance_km).toLocaleString()} km</span>}
-          <span><span className="text-[#03ace4]">●</span> Site marker on Moon rim</span>
-          <span><span className="text-white">━</span> Moon surface turns once per orbit; lit half faces Sun</span>
-          <span>Earth spin dot · approximate 24 h; shading follows Sun</span>
-        </div>
-        <div className="flex flex-wrap gap-x-4 gap-y-1">
           {currentEphemeris ? <>
             <span className="text-[#7ed2ef]">Earth from site: {visibilityText(currentEphemeris.earth)}</span>
             <span className="text-[#ffb45a]">Sun from site: {visibilityText(currentEphemeris.sun)}</span>
           </> : <span>Geometric positions projected onto the ecliptic plane.</span>}
         </div>
-        <div>Rays begin at the site when each body’s center clears sampled lunar terrain. The Sun arrow stops where its top-down projection would cross Earth’s enlarged disk; it does not indicate an eclipse. Sizes and site placement are schematic. Eclipses, Earth ground-station contact, and solar power are not modeled.</div>
+        <details>
+          <summary className="cursor-pointer text-[#d4dadd]">About this view</summary>
+          <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
+            {orbit && <span>Earth–Moon {Math.round(orbit.moon_distance_km).toLocaleString()} km</span>}
+            <span><span className="text-[#03ace4]">●</span> Site marker on Moon rim</span>
+            <span><span className="text-white">━</span> Moon surface turns once per orbit; lit half faces Sun</span>
+            <span>Earth spin dot · approximate 24 h; shading follows Sun</span>
+          </div>
+          <p className="mt-1">Rays begin at the site when each body’s center clears sampled lunar terrain. The Sun arrow stops where its top-down projection would cross Earth’s enlarged disk; it does not indicate an eclipse. Sizes and site placement are schematic. Eclipses, Earth ground-station contact, and solar power are not modeled.</p>
+        </details>
       </>}
     </div>
   </div>;

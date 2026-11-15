@@ -32,6 +32,8 @@ export default function MissionAnalysis({ latitude, longitude, arrivalUtc, durat
   const [terrainError, setTerrainError] = useState("");
   const [loading, setLoading] = useState(false);
   const [viewerMode, setViewerMode] = useState<"3d" | "2d">("3d");
+  const [mobile, setMobile] = useState(() => window.matchMedia("(max-width: 767px)").matches);
+  const [mobilePane, setMobilePane] = useState<"map" | "viewer">("viewer");
   const [orbit, setOrbit] = useState<OrbitGeometry | null>(null);
   const [orbitError, setOrbitError] = useState("");
   const arrival = useMemo(() => new Date(arrivalUtc), [arrivalUtc]);
@@ -39,6 +41,13 @@ export default function MissionAnalysis({ latitude, longitude, arrivalUtc, durat
   const viewTime = new Date(arrival.getTime() + elapsed * 3600_000);
 
   useEffect(() => { setElapsed(0); setPlaying(false); }, [arrivalUtc, latitude, longitude]);
+
+  useEffect(() => {
+    const query = window.matchMedia("(max-width: 767px)");
+    const update = () => setMobile(query.matches);
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
 
   useEffect(() => {
     if (!playing) return;
@@ -115,30 +124,38 @@ export default function MissionAnalysis({ latitude, longitude, arrivalUtc, durat
     return () => controller.abort();
   }, [viewerMode, latitude, longitude, viewTime.getTime()]);
 
+  const viewer = <div className="relative h-full min-h-0">
+    {viewerMode === "3d" ? <>
+      <TerrainScene patch={terrain} ephemeris={result} siteLabel={siteName} />
+      {terrainError && <p className="absolute left-3 right-3 top-3 bg-[#292929] p-2 text-xs text-[#ef9292]">{terrainError}. No terrain surface displayed.</p>}
+      {!terrain && !terrainError && <p className="pointer-events-none absolute left-3 top-3 bg-[#292929]/80 p-2 text-xs">Loading local DEM...</p>}
+    </> : <MoonSchematic orbit={orbit} ephemeris={result} siteLabel={siteName} error={orbitError} />}
+  </div>;
+
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#191919] text-[#ddd]">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#444] px-3 py-2 text-xs">
-        <span className="min-w-0 text-white">MISSION ANALYSIS <span className="ml-2 text-[#999]">{siteName}</span></span>
-        <div className="flex flex-wrap items-center gap-2">
+      <div className="flex shrink-0 flex-col gap-2 border-b border-[#444] px-3 py-2 text-xs sm:flex-row sm:items-center sm:justify-between">
+        <span className="flex min-w-0 items-center gap-2 text-white"><span className="shrink-0">MISSION ANALYSIS</span><span className="min-w-0 truncate text-[#999]">{siteName}</span></span>
+        <div className="flex shrink-0 items-center gap-2">
           <div role="group" aria-label="Mission viewer" className="flex border border-[#555]">
             {(["3d", "2d"] as const).map(mode => <button key={mode} type="button" aria-pressed={viewerMode === mode}
-              onClick={() => setViewerMode(mode)}
+              onClick={() => { setViewerMode(mode); setMobilePane("viewer"); }}
               className={`min-h-8 px-3 text-[11px] ${viewerMode === mode ? "bg-[#03ace4] text-white" : "bg-[#30363d] text-[#bbb] hover:bg-[#46505a]"}`}>{mode === "3d" ? "3D terrain" : "2D view"}</button>)}
           </div>
-          {viewerMode === "3d" && <span className="text-[10px] text-[#999]">{terrain?.resolution ? `LOLA ${terrain.resolution}` : "Local DEM"}{terrain ? ` · ${Math.round(terrain.coverage_fraction * 100)}% coverage` : ""}</span>}
+          {viewerMode === "3d" && <span className="hidden text-[10px] text-[#999] md:inline">{terrain?.resolution ? `LOLA ${terrain.resolution}` : "Local DEM"}{terrain ? ` · ${Math.round(terrain.coverage_fraction * 100)}% coverage` : ""}</span>}
         </div>
       </div>
-      <SplitWorkspace active splitId="analysis" primary={map} secondary={
-        <div className="relative h-full min-h-0">
-          {viewerMode === "3d" ? <>
-            <TerrainScene patch={terrain} ephemeris={result} siteLabel={siteName} />
-            {terrainError && <p className="absolute left-3 right-3 top-3 bg-[#292929] p-2 text-xs text-[#ef9292]">{terrainError}. No terrain surface displayed.</p>}
-            {!terrain && !terrainError && <p className="pointer-events-none absolute left-3 top-3 bg-[#292929]/80 p-2 text-xs">Loading local DEM...</p>}
-          </> : <MoonSchematic orbit={orbit} ephemeris={result} siteLabel={siteName}
-            error={orbitError} />}
-        </div>
-      } />
-      <div className="orbis-scroll max-h-[45%] shrink-0 space-y-2 overflow-y-auto overscroll-contain border-t border-[#444] bg-[#252525] p-2.5 text-xs leading-relaxed sm:max-h-[40%] sm:p-3">
+      {mobile && <div role="group" aria-label="Mobile mission view" className="grid shrink-0 grid-cols-2 border-b border-[#444]">
+        {(["map", "viewer"] as const).map(pane => <button key={pane} type="button" aria-pressed={mobilePane === pane}
+          onClick={() => setMobilePane(pane)}
+          className={`min-h-10 border-b-2 text-xs ${mobilePane === pane ? "border-[#03ace4] bg-[#303b40] text-white" : "border-transparent bg-[#252525] text-[#bbb]"}`}>
+          {pane === "map" ? "Map" : viewerMode === "2d" ? "2D view" : "3D terrain"}
+        </button>)}
+      </div>}
+      {mobile && mobilePane === "map" ? <div className="min-h-0 flex-1">{map}</div> : mobile ?
+        <div className="min-h-0 flex-1">{viewer}</div>
+      : <SplitWorkspace active splitId="analysis" primary={map} secondary={viewer} />}
+      <div className="orbis-scroll max-h-[35%] shrink-0 space-y-2 overflow-y-auto overscroll-contain border-t border-[#444] bg-[#252525] p-2.5 text-xs leading-relaxed sm:max-h-[40%] sm:p-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <span className="text-[#bbb]">MISSION TIME</span>
           <span className="font-mono text-[#eee]">{fmt(viewTime)}</span>

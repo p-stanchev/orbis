@@ -1,8 +1,8 @@
 # ORBIS
 
-A tool for exploring lunar landing sites and planning missions around the moon's south pole.
+A tool for exploring lunar landing sites and planning missions around the Moon's south pole.
 
-ORBIS aims to make it easier to explore potential landing locations, compare mission conditions and work together on lunar mission plans.
+ORBIS aims to make it easier to explore potential landing locations, compare mission conditions, and work together on lunar mission plans.
 
 ## Getting Started
 
@@ -38,13 +38,13 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5173 in your browser.
+Open [http://localhost:5173](http://localhost:5173) in your browser.
 
-The backend runs at http://localhost:8000, with API documentation available at http://localhost:8000/docs.
+The backend runs at [http://localhost:8000](http://localhost:8000), with API documentation available at [http://localhost:8000/docs](http://localhost:8000/docs).
 
 ## Datasets
 
-ORBIS uses publicly available NASA lunar datasets to explore the moon's south pole.
+ORBIS uses publicly available NASA lunar datasets to explore the Moon's south pole.
 
 Dataset paths are configured in [`data/datasets.json`](data/datasets.json), allowing datasets to be updated or replaced without changing the application code, provided the replacements are compatible with the processing pipeline.
 
@@ -59,6 +59,30 @@ Dataset paths are configured in [`data/datasets.json`](data/datasets.json), allo
 - Use Statistics to examine a project's search region. Resize the workspace panels on desktop; smaller screens use stacked panes and drawers.
 
 Candidate areas are visibility estimates, not confirmed safe landing sites. Sun visibility does not guarantee enough solar power, and Earth visibility does not guarantee a working radio link.
+
+### Featured Lunar Landmarks
+
+ORBIS includes a curated dataset of ten named features near the lunar south pole in [`frontend/public/landmarks.json`](frontend/public/landmarks.json). The entries include official feature-center coordinates, feature types, approximate diameters, and brief educational descriptions. A landmark's named center is **not** a recommended landing location.
+
+- **Names, coordinates, types, and diameters:** [USGS Gazetteer of Planetary Nomenclature — The Moon](https://planetarynames.wr.usgs.gov/Page/MOON/target). The Gazetteer publishes IAU-approved feature names and lunar coordinate information.
+- **Scientific context and imagery:** NASA's [Lunar South Pole Terrain in Coded Color](https://svs.gsfc.nasa.gov/5127), the [Lunar Reconnaissance Orbiter Camera (LROC)](https://lroc.im-ldi.com/), and NASA's [Scientific Visualization Studio](https://svs.gsfc.nasa.gov/).
+- **Descriptions:** Short ORBIS-written summaries based on the cited material; they are not verbatim NASA descriptions or official NASA assessments.
+- **Images:** The `image.source_page_url` field links to the original media/reference page. The `image.url` field is `null` until a suitable image is downloaded, reviewed, and credited. To serve local images, save them as `frontend/public/landmarks/<id>.webp` and set `image.url` to `/landmarks/<id>.webp`.
+
+| Featured landmark | Official feature record | Media / scientific reference |
+|---|---|---|
+| Shackleton | [USGS](https://planetarynames.wr.usgs.gov/Feature/5450) | [NASA SVS — Visualizing Shackleton](https://svs.gsfc.nasa.gov/4716) |
+| de Gerlache | [USGS](https://planetarynames.wr.usgs.gov/Feature/1439) | [LROC — Shackleton–de Gerlache Ridge](https://lroc.im-ldi.com/images/1247) |
+| Haworth | [USGS](https://planetarynames.wr.usgs.gov/Feature/14502) | [NASA SVS — South Pole Terrain](https://svs.gsfc.nasa.gov/5127) |
+| Shoemaker | [USGS](https://planetarynames.wr.usgs.gov/Feature/5494) | [LROC — Permanently Shadowed Craters](https://lroc.im-ldi.com/images/1255) |
+| Faustini | [USGS](https://planetarynames.wr.usgs.gov/Feature/1919) | [LROC — Faustini PSR Atlas](https://lroc.im-ldi.com/atlases/psr/SP_871460_0840750) |
+| Cabeus | [USGS](https://planetarynames.wr.usgs.gov/Feature/953) | [NASA Science — Cabeus Crater](https://science.nasa.gov/image-detail/cabeus-crater-lro/) |
+| Sverdrup | [USGS](https://planetarynames.wr.usgs.gov/Feature/5782) | [LROC — South Pole Map](https://lroc.im-ldi.com/news/1179) |
+| Nobile | [USGS](https://planetarynames.wr.usgs.gov/Feature/4321) | [LROC — Nobile Rim Terrain](https://data.lroc.im-ldi.com/lroc/view_rdr/NAC_DTM_NOBILE02) |
+| Amundsen | [USGS](https://planetarynames.wr.usgs.gov/Feature/247) | [NASA SVS — South Pole Terrain](https://svs.gsfc.nasa.gov/5127) |
+| Mons Mouton | [USGS](https://planetarynames.wr.usgs.gov/Feature/16070) | [NASA Science — Mons Mouton](https://science.nasa.gov/resource/mons-mouton-a-newly-named-lunar-mountain/) |
+
+A media page may show a wider region, selected terrain, or a scientific visualization rather than a photograph centered on the named feature. Check each image's subject, credit, and usage terms before adding it to the tour. For reuse, see [NASA's Images and Media Usage Guidelines](https://www.nasa.gov/nasa-brand-center/images-and-media/). LROC products should retain the credits specified on their source pages (often NASA/GSFC/Arizona State University). NASA imagery and the USGS Gazetteer are independent sources: the latter establishes feature names/positions, not image attribution.
 
 ### Lunar Terrain
 
@@ -133,6 +157,8 @@ Lunar terrain datasets are provided by NASA's Goddard Space Flight Center throug
 - [LOLA South Pole Dataset DOI](https://doi.org/10.60903/gsfcpgda-lola-spole)
 
 Astronomical ephemeris and lunar reference-frame data are provided by NASA/JPL's Navigation and Ancillary Information Facility through the SPICE system.
+
+Lunar landmark names and official feature-center coordinates are sourced from the [USGS Gazetteer of Planetary Nomenclature](https://planetarynames.wr.usgs.gov/Page/MOON/target). Additional image and educational references are listed in the [Featured Lunar Landmarks](#featured-lunar-landmarks) section; each image must also retain its individual credit.
 
 ## License
 

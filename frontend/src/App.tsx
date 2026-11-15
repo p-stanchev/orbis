@@ -11,6 +11,8 @@ import {
   ChevronDown,
   ChevronRight,
   Folder,
+  Lock,
+  LockOpen,
   PanelLeftClose,
   PanelLeftOpen,
   PanelRightClose,
@@ -52,6 +54,7 @@ type Props = { children: ReactNode; onClick: () => void; title: string };
 const VISIBILITY_KEY = "orbis-hidden-projects-v1";
 const BROWSE_WIDTH_KEY = "orbis-browse-width-v1";
 const INSPECTOR_WIDTH_KEY = "orbis-inspector-width-v1";
+const UNLOCKED_MARKERS_KEY = "orbis-unlocked-map-markers-v1";
 
 function savedWidth(key: string, fallback: number) {
   const value = Number(localStorage.getItem(key));
@@ -65,6 +68,17 @@ function loadHiddenProjects(): string[] {
     );
     return Array.isArray(stored)
       ? stored.filter((id): id is string => typeof id === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function loadUnlockedSites(): string[] {
+  try {
+    const stored: unknown = JSON.parse(localStorage.getItem(UNLOCKED_MARKERS_KEY) ?? "[]");
+    return Array.isArray(stored)
+      ? stored.filter((key): key is string => typeof key === "string" && key.startsWith("site:")).map(key => key.slice(5))
       : [];
   } catch {
     return [];
@@ -110,12 +124,14 @@ function Coordinate({
   label,
   value,
   save,
+  disabled = false,
   min,
   max,
 }: {
   label: string;
   value: number;
   save: (value: number) => Promise<void>;
+  disabled?: boolean;
   min?: number;
   max?: number;
 }) {
@@ -128,6 +144,7 @@ function Coordinate({
   }, [value]);
 
   async function commit() {
+    if (disabled) { setDraft(String(value)); return; }
     if (cancelled.current) {
       cancelled.current = false;
       return;
@@ -159,6 +176,7 @@ function Coordinate({
         type="text"
         inputMode="decimal"
         aria-label={label}
+        disabled={disabled}
         onChange={(event) => setDraft(event.target.value)}
         onBlur={() => void commit()}
         onKeyDown={(event) => {
@@ -169,7 +187,7 @@ function Coordinate({
             event.currentTarget.blur();
           }
         }}
-        className={`mt-1 w-full border bg-[#292929] p-2 text-white outline-none focus:border-accent ${error ? "border-danger" : "border-[#555]"}`}
+        className={`mt-1 w-full border bg-[#292929] p-2 text-white outline-none focus:border-accent disabled:cursor-not-allowed disabled:opacity-60 ${error ? "border-danger" : "border-[#555]"}`}
       />
       {error && (
         <span className="mt-1 block text-[11px] text-[#ef9292]">
@@ -323,6 +341,7 @@ function App() {
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [hiddenProjects, setHiddenProjects] =
     useState<string[]>(loadHiddenProjects);
+  const [unlockedSites, setUnlockedSites] = useState<string[]>(loadUnlockedSites);
   const [connected, setConnected] = useState(false);
   const [clients, setClients] = useState(0);
   const [selected, setSelected] = useState<Target | null>(null);
@@ -347,6 +366,10 @@ function App() {
   useEffect(() => {
     localStorage.setItem(VISIBILITY_KEY, JSON.stringify(hiddenProjects));
   }, [hiddenProjects]);
+
+  useEffect(() => {
+    localStorage.setItem(UNLOCKED_MARKERS_KEY, JSON.stringify(unlockedSites.map(id => `site:${id}`)));
+  }, [unlockedSites]);
 
   useEffect(() => {
     localStorage.setItem(BROWSE_WIDTH_KEY, String(browseWidth));
@@ -555,7 +578,7 @@ function App() {
     field: "latitude" | "longitude",
     value: number,
   ) {
-    if (!selected?.siteId) return;
+    if (!selected?.siteId || !unlockedSites.includes(selected.siteId)) return;
     await request(urlFor(selected), "PATCH", { [field]: value });
     await reload();
   }
@@ -565,7 +588,7 @@ function App() {
     latitude: number,
     longitude: number,
   ) {
-    if (!target.siteId) return;
+    if (!target.siteId || !unlockedSites.includes(target.siteId)) return;
     await request(urlFor(target), "PATCH", { latitude, longitude });
     await reload();
   }
@@ -612,7 +635,9 @@ function App() {
         <button aria-label="Close Browse" title="Close Browse"
           onClick={() => { setDrawer(null); setBrowseOpen(false); }}><PanelLeftClose size={16} /></button>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div className="orbis-scroll min-h-0 flex-1 overflow-auto" onClick={event => {
+        if (event.target === event.currentTarget) { setSelected(null); setProbePoint(null); setMenu(null); }
+      }}>
         {filtered.map((project) => {
           const expandedNow = expanded.includes(project.id) || !!search;
           const isHidden = hiddenProjects.includes(project.id);
@@ -639,6 +664,7 @@ function App() {
                 </IconButton>
                 <button
                   className="flex min-w-0 flex-1 items-center gap-2 text-left text-xs"
+                  onDoubleClick={() => openDialog("rename", { projectId: project.id })}
                   onClick={() => {
                     setSelected({ projectId: project.id });
                     setProbePoint(null);
@@ -698,6 +724,7 @@ function App() {
                     >
                       <button
                         className="flex min-w-0 flex-1 items-center gap-2 text-left text-xs"
+                        onDoubleClick={() => openDialog("rename", { projectId: project.id, siteId: site.id })}
                         onClick={() => {
                           setSelected({
                             projectId: project.id,
@@ -709,6 +736,15 @@ function App() {
                       >
                         <MapPin size={13} className="shrink-0" style={{ color: project.color }} />
                         <span className="truncate">{site.name}</span>
+                      </button>
+                      <button type="button"
+                        aria-label={`${unlockedSites.includes(site.id) ? "Lock" : "Unlock"} ${site.name} for map editing`}
+                        aria-pressed={!unlockedSites.includes(site.id)}
+                        title={unlockedSites.includes(site.id) ? "Lock site position" : "Unlock site position"}
+                        onClick={() => setUnlockedSites(current => current.includes(site.id)
+                          ? current.filter(id => id !== site.id) : [...current, site.id])}
+                        className={`flex h-8 w-8 shrink-0 items-center justify-center hover:bg-[#484848] ${unlockedSites.includes(site.id) ? "text-[#03ace4]" : "text-[#aaa]"}`}>
+                        {unlockedSites.includes(site.id) ? <LockOpen size={15} /> : <Lock size={15} />}
                       </button>
                       <IconButton
                         title="Site options"
@@ -775,10 +811,11 @@ function App() {
       {currentSite && currentProject ? (
         <div className="space-y-3 p-3">
           <p className="break-words text-xs font-medium">{currentSite.name}</p>
+          {!unlockedSites.includes(currentSite.id) && <p className="text-[11px] text-[#aaa]">Site position locked. Unlock it in Browse to move or edit coordinates.</p>}
           <Coordinate key={`${currentSite.id}-lat`} label="Latitude" value={currentSite.latitude}
-            save={value => saveCoordinate("latitude", value)} />
+            disabled={!unlockedSites.includes(currentSite.id)} save={value => saveCoordinate("latitude", value)} />
           <Coordinate key={`${currentSite.id}-lon`} label="Longitude" value={currentSite.longitude}
-            save={value => saveCoordinate("longitude", value)} />
+            disabled={!unlockedSites.includes(currentSite.id)} save={value => saveCoordinate("longitude", value)} />
           <button type="button" onClick={() => { setWorkspace("analysis"); setDrawer(null); }}
             className="w-full bg-[#03ace4] px-3 py-2 text-left text-xs font-medium text-white hover:bg-[#079bc9]">
             Open Mission Analysis
@@ -803,6 +840,7 @@ function App() {
   const mapView = <LunarMap
     projects={projects}
     hiddenProjectIds={hiddenProjects}
+    unlockedSiteIds={unlockedSites}
     selected={selected}
     regions={workspace === "explore" ? regions?.projectId === null ? regions : null : regions?.projectId ? regions : null}
     exploreArea={workspace === "explore" ? exploreArea : null}
@@ -843,8 +881,6 @@ function App() {
           >
             <Menu size={20} />
           </button>
-          {!browseOpen && <button className="hidden lg:block" aria-label="Open Browse"
-            title="Open Browse" onClick={() => setBrowseOpen(true)}><PanelLeftOpen size={18} /></button>}
           <button
             className="flex h-9 items-center gap-1 bg-accent px-2 text-xs font-medium text-white transition-colors hover:bg-[#079bc9]"
             onClick={() => openDialog("project")}
@@ -885,8 +921,6 @@ function App() {
             {clients}
           </span>
           <span className="hidden font-mono text-[10px] md:inline">{utc}</span>
-          {!inspectorOpen && <button className="hidden lg:block" aria-label="Open Inspector"
-            title="Open Inspector" onClick={() => setInspectorOpen(true)}><PanelRightOpen size={18} /></button>}
           <button
             className="lg:hidden"
             title="Inspector"
@@ -905,7 +939,10 @@ function App() {
           {browseOpen && resizeHandle("browse")}
         </aside>
         <main className="flex min-h-0 min-w-0 flex-col overflow-hidden bg-[#191919]" aria-label="Lunar mission workspace">
-          <div className="orbis-scroll flex h-11 min-w-0 shrink-0 items-center gap-1 overflow-x-auto border-b border-[#505050] bg-[#242424] px-2 text-xs">
+          <div className="flex h-11 min-w-0 shrink-0 items-center border-b border-[#505050] bg-[#242424] text-xs">
+            {!browseOpen && <button type="button" className="hidden h-full w-10 shrink-0 items-center justify-center border-r border-[#444] text-[#aaa] hover:bg-[#333] hover:text-white lg:flex"
+              aria-label="Open Browse" title="Open Browse" onClick={() => setBrowseOpen(true)}><PanelLeftOpen size={18} /></button>}
+            <div className="orbis-scroll flex h-full min-w-0 flex-1 items-center gap-1 overflow-x-auto px-2">
             <button type="button" onClick={() => { setWorkspace("map"); setProbeMode(false); }}
               className={`h-9 shrink-0 border-b-2 px-3 transition-colors ${workspace === "map" ? "border-accent bg-[#363636] text-white" : "border-transparent text-[#aaa] hover:bg-[#333] hover:text-white"}`}>
               Map
@@ -925,6 +962,9 @@ function App() {
               className={`h-9 shrink-0 border-b-2 px-3 transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${workspace === "statistics" ? "border-accent bg-[#363636] text-white" : "border-transparent text-[#aaa] hover:bg-[#333] hover:text-white"}`}>
               Statistics
             </button>
+            </div>
+            {!inspectorOpen && <button type="button" className="hidden h-full w-10 shrink-0 items-center justify-center border-l border-[#444] text-[#aaa] hover:bg-[#333] hover:text-white lg:flex"
+              aria-label="Open Inspector" title="Open Inspector" onClick={() => setInspectorOpen(true)}><PanelRightOpen size={18} /></button>}
           </div>
           <SplitWorkspace
             key={workspace === "statistics" ? "statistics" : "explore"}
