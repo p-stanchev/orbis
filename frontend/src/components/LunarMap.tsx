@@ -565,6 +565,23 @@ export default function LunarMap({ landmarksEnabled, projects, hiddenProjectIds,
       return;
     }
     if (probeMode) return;
+    if (current.marker && current.moved && (current.marker.siteId
+      ? unlockedSiteIds.includes(current.marker.siteId) : !projectLocked(current.marker.projectId))) {
+      const point = constrainedPoint(event.clientX - current.markerOffset.x,
+        event.clientY - current.markerOffset.y);
+      const location = current.marker.siteId ? withinSearchRadius(point, current.marker)
+        : withinProjectSites(point, current.marker);
+      onSelectSite(current.marker);
+      if (location) void place(current.marker, location);
+      return;
+    }
+    if (current.marker) {
+      if (!current.moved) {
+        const active = current.marker.projectId === selected?.projectId && current.marker.siteId === selected?.siteId;
+        if (!current.markerOffset.x && !current.markerOffset.y) onSelectSite(active ? null : current.marker);
+      }
+      return;
+    }
     if (exploreArea) {
       if (!current.moved && !current.explore) {
         const location = normalizedPoint(event.clientX, event.clientY);
@@ -574,19 +591,7 @@ export default function LunarMap({ landmarksEnabled, projects, hiddenProjectIds,
       }
       return;
     }
-
-    if (current.marker && current.moved && (current.marker.siteId
-      ? unlockedSiteIds.includes(current.marker.siteId) : !projectLocked(current.marker.projectId))) {
-      const point = constrainedPoint(event.clientX - current.markerOffset.x,
-        event.clientY - current.markerOffset.y);
-      const location = current.marker.siteId ? withinSearchRadius(point, current.marker)
-        : withinProjectSites(point, current.marker);
-      onSelectSite(current.marker);
-      if (location) void place(current.marker, location);
-    } else if (current.marker && !current.moved) {
-      const active = current.marker.projectId === selected?.projectId && current.marker.siteId === selected?.siteId;
-      if (!current.markerOffset.x && !current.markerOffset.y) onSelectSite(active ? null : current.marker);
-    } else if (!current.moved && !current.marker && !probePoint && selected && !selectedLocked) {
+    if (!current.moved && !probePoint && selected && !selectedLocked) {
       const point = normalizedPoint(event.clientX, event.clientY);
       void place(selected, selected.siteId ? withinSearchRadius(point, selected)
         : withinProjectSites(point, selected));
@@ -730,7 +735,7 @@ export default function LunarMap({ landmarksEnabled, projects, hiddenProjectIds,
                   title="Drag the ring to move the Explore area" aria-label="Drag the search area" />
               </div>}
             {exploreArea && exploreMarker && <button type="button" data-explore-drag
-              className="absolute z-[12] flex h-9 w-9 cursor-grab items-center justify-center active:cursor-grabbing"
+              className="absolute z-[9] flex h-9 w-9 cursor-grab items-center justify-center active:cursor-grabbing"
               style={{ left: `${(explorePreview?.u ?? exploreMarker.u) * 100}%`, top: `${(explorePreview?.v ?? exploreMarker.v) * 100}%`,
                 transform: `translate(-50%, -50%) scale(${1 / zoom})` }}
               aria-label="Drag Explore search center" title="Drag to move Explore area">
