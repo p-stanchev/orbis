@@ -37,6 +37,7 @@ import SplitWorkspace from "./components/SplitWorkspace";
 import VisibilityStatistics, { type SearchRegion, type SearchGridCell } from "./components/VisibilityStatistics";
 import ExploreSearch from "./components/ExploreSearch";
 import ResilienceExplorer from "./components/ResilienceExplorer";
+import OptimalLandingWindow from "./components/OptimalLandingWindow";
 import NumericInput from "./components/NumericInput";
 
 type Site = { id: string; name: string; latitude: number; longitude: number };
@@ -350,7 +351,9 @@ function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [workspace, setWorkspace] = useState<"map" | "explore" | "analysis" | "statistics">("map");
   const [selectedMissionHours, setSelectedMissionHours] = useState(0);
-  const [exploreMode, setExploreMode] = useState<"candidates" | "resilience">("candidates");
+  const [exploreMode, setExploreMode] = useState<"candidates" | "resilience" | "windows">("candidates");
+  const [landingUncertainty, setLandingUncertainty] = useState(500);
+  const [analysisPreview, setAnalysisPreview] = useState<{ projectId: string; siteId: string; arrival: string; duration: number } | null>(null);
   const [browseOpen, setBrowseOpen] = useState(true);
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [hiddenProjects, setHiddenProjects] =
@@ -530,6 +533,9 @@ function App() {
   useEffect(() => {
     if (workspace === "analysis" && !canAnalyze) setWorkspace("map");
   }, [workspace, canAnalyze]);
+  useEffect(() => {
+    if (workspace !== "analysis") setAnalysisPreview(null);
+  }, [workspace]);
   const targetName = (target: Target) => {
     const project = projects.find((item) => item.id === target.projectId);
     return target.siteId
@@ -665,6 +671,23 @@ function App() {
     }
     await request(`/api/projects/${projectId}`, "PATCH", changes);
     await reload();
+  }
+
+  function inspectArrival(projectId: string, siteId: string, arrival: string, duration: number) {
+    setSelected({ projectId, siteId });
+    setProbePoint(null);
+    setAnalysisPreview({ projectId, siteId, arrival, duration });
+    setSelectedMissionHours(0);
+    setWorkspace("analysis");
+  }
+
+  async function applyArrival(projectId: string, siteId: string, arrival: string, duration: number) {
+    await saveMissionSettings(projectId, { arrival_utc: arrival, duration_hours: duration });
+    setAnalysisPreview(null);
+    setSelected({ projectId, siteId });
+    setProbePoint(null);
+    setSelectedMissionHours(0);
+    setWorkspace("analysis");
   }
 
   async function createFromExplore(name: string, latitude: number, longitude: number,
@@ -1081,11 +1104,12 @@ function App() {
             splitId={workspace === "statistics" ? "statistics" : "explore"}
             active={workspace === "explore" || workspace === "statistics"}
             primary={workspace === "analysis" && canAnalyze && currentProject ? (
-              <MissionAnalysis key={`${currentProject.id}-${currentSite?.id ?? "center"}`}
+              <MissionAnalysis key={`${currentProject.id}-${currentSite?.id ?? "center"}-${analysisPreview?.arrival ?? "saved"}`}
                 latitude={probePoint?.latitude ?? currentSite!.latitude}
                 longitude={probePoint?.longitude ?? currentSite!.longitude}
-                arrivalUtc={currentProject.arrival_utc} durationHours={currentProject.duration_hours}
-                siteName={probePoint ? "Inspected point" : currentSite!.name} map={mapView}
+                arrivalUtc={analysisPreview?.projectId === currentProject.id && analysisPreview.siteId === currentSite?.id ? analysisPreview.arrival : currentProject.arrival_utc}
+                durationHours={analysisPreview?.projectId === currentProject.id && analysisPreview.siteId === currentSite?.id ? analysisPreview.duration : currentProject.duration_hours}
+                siteName={probePoint ? "Inspected point" : `${currentSite!.name}${analysisPreview?.projectId === currentProject.id && analysisPreview.siteId === currentSite?.id ? " · date preview (unsaved)" : ""}`} map={mapView}
                 elapsedHours={selectedMissionHours} onElapsedChange={setSelectedMissionHours} />
             ) : mapView}
             secondary={workspace === "statistics" && currentProject ? (
@@ -1115,27 +1139,37 @@ function App() {
               </div>
             ) :
               <div className="orbis-scroll h-full overflow-y-auto overscroll-contain bg-[#252525] p-2.5 sm:p-3">
-                <div className="mx-auto mb-3 max-w-[1200px] border-b border-[#444]">
-                  <h2 className="pb-2 text-sm font-medium text-white">Explore</h2>
-                  <div role="tablist" aria-label="Explore tools" className="grid w-full grid-cols-2 border-x border-t border-[#444] bg-[#292929]">
+                <div className="mx-auto max-w-[1200px] border border-[#454b50] bg-[#242424] p-3">
+                <div className="mb-3 border-b border-[#444]">
+                  <h2 className="pb-3 text-base font-semibold text-white">Explore</h2>
+                  <div role="tablist" aria-label="Explore tools" className="grid w-full grid-cols-3 bg-[#292929]">
                     <button type="button" id="explore-candidates-tab" role="tab" aria-controls="explore-candidates-panel" aria-selected={exploreMode === "candidates"}
                       onClick={() => setExploreMode("candidates")}
                       onKeyDown={event => { if (event.key === "ArrowRight") { setExploreMode("resilience"); document.getElementById("explore-resilience-tab")?.focus(); } }}
                       className={`min-w-0 min-h-11 border-b-2 border-r border-r-[#444] px-2 text-[11px] sm:px-3 sm:text-xs ${exploreMode === "candidates" ? "border-b-accent bg-[#303b40] text-white" : "border-b-transparent text-[#bbb] hover:bg-[#383838]"}`}>Candidate search</button>
                     <button type="button" id="explore-resilience-tab" role="tab" aria-controls="explore-resilience-panel" aria-selected={exploreMode === "resilience"}
                       onClick={() => setExploreMode("resilience")}
-                      onKeyDown={event => { if (event.key === "ArrowLeft") { setExploreMode("candidates"); document.getElementById("explore-candidates-tab")?.focus(); } }}
-                      className={`min-w-0 min-h-11 border-b-2 px-2 text-[11px] sm:px-3 sm:text-xs ${exploreMode === "resilience" ? "border-b-accent bg-[#303b40] text-white" : "border-b-transparent text-[#bbb] hover:bg-[#383838]"}`}>Resilience explorer</button>
+                      onKeyDown={event => { if (event.key === "ArrowLeft") { setExploreMode("candidates"); document.getElementById("explore-candidates-tab")?.focus(); } else if (event.key === "ArrowRight") { setExploreMode("windows"); document.getElementById("explore-windows-tab")?.focus(); } }}
+                      className={`min-w-0 min-h-11 border-b-2 border-r border-r-[#444] px-2 text-[11px] sm:px-3 sm:text-xs ${exploreMode === "resilience" ? "border-b-accent bg-[#303b40] text-white" : "border-b-transparent text-[#bbb] hover:bg-[#383838]"}`}>Resilience explorer</button>
+                    <button type="button" id="explore-windows-tab" role="tab" aria-controls="explore-windows-panel" aria-selected={exploreMode === "windows"}
+                      onClick={() => setExploreMode("windows")}
+                      onKeyDown={event => { if (event.key === "ArrowLeft") { setExploreMode("resilience"); document.getElementById("explore-resilience-tab")?.focus(); } }}
+                      className={`min-w-0 min-h-11 border-b-2 px-2 text-[11px] sm:px-3 sm:text-xs ${exploreMode === "windows" ? "border-b-accent bg-[#303b40] text-white" : "border-b-transparent text-[#bbb] hover:bg-[#383838]"}`}>Landing windows</button>
                   </div>
                 </div>
                 <div id="explore-candidates-panel" role="tabpanel" aria-labelledby="explore-candidates-tab" hidden={exploreMode !== "candidates"}>
-                  <ExploreSearch area={exploreArea}
+                  <ExploreSearch area={exploreArea} uncertainty={landingUncertainty} onUncertaintyChange={setLandingUncertainty}
                     onAreaChange={area => { setExploreArea(area); setRegions(null); }}
                     onRegions={(areas, grid, spacing) => setRegions({ projectId: null, areas, grid, spacing })}
                     onCreateProject={createFromExplore} />
                 </div>
                 <div id="explore-resilience-panel" role="tabpanel" aria-labelledby="explore-resilience-tab" hidden={exploreMode !== "resilience"}>
                   <ResilienceExplorer projects={projects} initialProjectId={currentProject?.id} />
+                </div>
+                <div id="explore-windows-panel" role="tabpanel" aria-labelledby="explore-windows-tab" hidden={exploreMode !== "windows"}>
+                  <OptimalLandingWindow projects={projects} initialProjectId={currentProject?.id} initialSiteId={currentSite?.id}
+                    uncertaintyM={landingUncertainty} onInspect={inspectArrival} onApply={applyArrival} />
+                </div>
                 </div>
               </div>
             }

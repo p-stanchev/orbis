@@ -51,12 +51,14 @@ Dataset paths are configured in [`data/datasets.json`](data/datasets.json), allo
 ## Features
 
 - Explore the lunar south pole without creating a project first. Choose a search area on the map, an arrival time, and a mission duration.
-- Set the longest darkness and Earth-visibility outage your mission can tolerate. Daily Earth contact and minimum candidate area are optional filters.
+- Set the longest darkness and Earth-visibility outage your mission can tolerate. Daily Earth contact, minimum candidate area, slope, and roughness are optional filters.
 - Compare candidate areas on the map. Green, yellow, and red show how sampled locations compare with your limits.
 - If no candidate area meets the limits, compare arrivals 7, 14, and 21 days later.
+- For a selected landing site, search 30, 60, or 90 days for favorable arrival times under your darkness and Earth-outage limits. Preview a result in Mission Analysis or save its arrival time and duration to the project.
 - Create a project and an initial candidate site from a search result. You can move the site or add more sites afterward.
+- Use the map's optional PSR, landmark, elevation-contour, and slope layers to explore terrain context.
 - Use Mission Analysis to see Sun and Earth visibility windows and a timeline for a selected site or inspected point.
-- Use Statistics to examine a project's search region. Resize the workspace panels on desktop; smaller screens use stacked panes and drawers.
+- Use Statistics to examine mission visibility, inspect points, and compare landing sites. Resize the workspace panels on desktop; smaller screens use stacked panes and drawers.
 
 Candidate areas are visibility estimates, not confirmed safe landing sites. Sun visibility does not guarantee enough solar power, and Earth visibility does not guarantee a working radio link.
 
@@ -106,7 +108,7 @@ A media page may show a wider region, selected terrain, or a scientific visualiz
 
 The original terrain files are stored in `data/source/`. Large source files and generated data are excluded from Git.
 
-The 5 m mosaic is intended for detailed regional analysis. The application must support and validate the high-resolution datasets before they can be used.
+The 5 m mosaic is used for local terrain horizons and slope where covered; the 80 m DEM supplies wider-area terrain data. The map's slope layer combines the 5 m slope raster where available with an 80 m DEM-derived estimate elsewhere.
 
 ### SPICE Kernels
 

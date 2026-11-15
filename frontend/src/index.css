@@ -34,9 +34,35 @@ summary:focus-visible {
   outline-offset: 2px;
 }
 
-input:focus-visible {
+input:focus,
+textarea:focus {
   outline: none;
   border-color: #03ace4;
+}
+
+select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2303ace4' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 16px;
+  padding-right: 40px !important;
+}
+
+select:focus {
+  border-color: #03ace4;
+  outline: 2px solid #03ace4;
+  outline-offset: -2px;
+}
+
+select option {
+  background: #292929;
+  color: #fff;
+}
+
+select option:checked {
+  background: #03ace4;
+  color: #10191d;
 }
 
 .orbis-numeric-input[type="number"] {
@@ -57,6 +83,10 @@ input:focus-visible {
 
 .orbis-explore :is(input, button, summary) {
   font-family: inherit;
+}
+
+.orbis-explore .orbis-panel {
+  border-radius: 0;
 }
 
 .orbis-statistics {

@@ -39,6 +39,7 @@ class VisibilityRequest(BaseModel):
 
 class RegionRequest(VisibilityRequest):
     radius_m: float = Field(ge=50, le=20000)
+    landing_uncertainty_m: float = Field(default=0, ge=0, le=5000)
     sun_weight: int = Field(default=70, ge=0, le=100)
     max_no_sun_hours: float | None = Field(default=None, ge=0, le=8760)
     max_no_earth_hours: float | None = Field(default=None, ge=0, le=8760)
@@ -46,6 +47,13 @@ class RegionRequest(VisibilityRequest):
     min_area_km2: float = Field(default=4, ge=0.001, le=1000)
     max_slope_deg: float | None = Field(default=None, ge=0, le=90)
     max_roughness_m: float | None = Field(default=None, ge=0, le=1000)
+
+
+class WindowSearchRequest(VisibilityRequest):
+    search_days: int = Field(ge=1, le=90)
+    max_no_sun_hours: float = Field(ge=0, le=8760)
+    max_no_earth_hours: float = Field(ge=0, le=8760)
+    landing_uncertainty_m: float = Field(default=0, ge=0, le=5000)
 
 
 def timestamp_text(value: datetime) -> str:
@@ -220,6 +228,117 @@ def compute(job_id: str, data: VisibilityRequest) -> None:
             _jobs[job_id].update(status="failed", error=str(exc))
 
 
+def _window_slice(summary: dict, start: datetime, end: datetime) -> dict:
+    segments = []
+    for window in summary["windows"]:
+        opening = max(start, datetime.fromisoformat(window["start_utc"].replace("Z", "+00:00")))
+        closing = min(end, datetime.fromisoformat(window["end_utc"].replace("Z", "+00:00")))
+        if opening < closing:
+            segments.append({"start_utc": timestamp_text(opening), "end_utc": timestamp_text(closing),
+                             "hours": (closing - opening).total_seconds() / 3600})
+    return summarize_segments(segments, start, end)
+
+
+def _offset_position(lat: float, lon: float, east_m: float, north_m: float) -> tuple[float, float]:
+    distance = math.hypot(east_m, north_m)
+    arc = distance / 1737400.0
+    bearing = math.atan2(east_m, north_m)
+    latitude = math.radians(lat)
+    longitude = math.radians(lon)
+    shifted_lat = math.asin(math.sin(latitude) * math.cos(arc) +
+                            math.cos(latitude) * math.sin(arc) * math.cos(bearing))
+    shifted_lon = longitude + math.atan2(math.sin(bearing) * math.sin(arc) * math.cos(latitude),
+                                         math.cos(arc) - math.sin(latitude) * math.sin(shifted_lat))
+    return math.degrees(shifted_lat), (math.degrees(shifted_lon) + 180) % 360 - 180
+
+
+def compute_window_search(job_id: str, data: WindowSearchRequest) -> None:
+    try:
+        start = data.arrival_utc
+        end = start + timedelta(days=data.search_days, hours=data.duration_hours)
+        positions = [(data.latitude, data.longitude)]
+        if data.landing_uncertainty_m:
+            for index in range(8):
+                angle = index * math.pi / 4
+                positions.append(_offset_position(data.latitude, data.longitude,
+                                                  data.landing_uncertainty_m * math.sin(angle),
+                                                  data.landing_uncertainty_m * math.cos(angle)))
+        profiles = [terrain_horizon_profile(round(lat, 6), round(lon, 6)) for lat, lon in positions]
+        horizons = [profile["angles"] for profile in profiles]
+        if not all(len(item) == len(horizons[0]) for item in horizons):
+            raise ValueError("Terrain horizon samples do not share an angular grid")
+        horizon = tuple(max(values) for values in zip(*horizons))
+        hours = (end - start).total_seconds() / 3600
+        step_hours = max(0.25, hours / 12000)
+        steps = math.ceil(hours / step_hours)
+        samples = []
+        for index in range(steps + 1):
+            utc = start + timedelta(hours=hours * index / steps)
+            samples.append((utc, ephemeris_values(utc, data.latitude, data.longitude)))
+            if index % 40 == 0 or index == steps:
+                with _jobs_lock:
+                    _jobs[job_id]["progress"] = round(0.8 * index / steps, 3)
+        sun = windows_for(samples, "sun", data.latitude, data.longitude, horizon)
+        earth = windows_for(samples, "earth", data.latitude, data.longitude, horizon)
+        both = joint_windows(sun, earth, start, end)
+
+        def evaluate(arrival: datetime) -> dict:
+            mission_end = arrival + timedelta(hours=data.duration_hours)
+            sun_part = _window_slice(sun, arrival, mission_end)
+            earth_part = _window_slice(earth, arrival, mission_end)
+            both_part = _window_slice(both, arrival, mission_end)
+            darkness = sun_part["longest_hidden_hours"]
+            outage = earth_part["longest_hidden_hours"]
+            violations = []
+            if darkness > data.max_no_sun_hours + 0.001:
+                violations.append({"label": "Darkness", "actual_hours": darkness,
+                                   "limit_hours": data.max_no_sun_hours})
+            if outage > data.max_no_earth_hours + 0.001:
+                violations.append({"label": "Earth outage", "actual_hours": outage,
+                                   "limit_hours": data.max_no_earth_hours})
+            return {"arrival_utc": timestamp_text(arrival), "end_utc": timestamp_text(mission_end),
+                    "sun_percent": sun_part["visible_percent"], "earth_percent": earth_part["visible_percent"],
+                    "both_percent": both_part["visible_percent"], "darkness_hours": darkness,
+                    "earth_outage_hours": outage, "violations": violations, "feasible": not violations}
+
+        def rank(item: dict) -> tuple:
+            excess = max(0, item["darkness_hours"] - data.max_no_sun_hours) / max(1, data.max_no_sun_hours)
+            excess += max(0, item["earth_outage_hours"] - data.max_no_earth_hours) / max(1, data.max_no_earth_hours)
+            return (not item["feasible"], excess, -item["both_percent"],
+                    item["darkness_hours"], item["earth_outage_hours"], item["arrival_utc"])
+
+        daily = []
+        arrivals = []
+        for index in range(data.search_days):
+            coarse = evaluate(start + timedelta(days=index))
+            refined = [evaluate(start + timedelta(days=index, hours=hour)) for hour in range(1, 24)]
+            daily.append(min([coarse] + refined, key=rank))
+            arrivals.extend([coarse] + refined)
+            with _jobs_lock:
+                _jobs[job_id]["progress"] = round(0.8 + 0.19 * (index + 1) / data.search_days, 3)
+        ranked = sorted(arrivals, key=rank)
+        unique = []
+        for item in ranked:
+            time = datetime.fromisoformat(item["arrival_utc"].replace("Z", "+00:00"))
+            if all(abs((time - datetime.fromisoformat(other["arrival_utc"].replace("Z", "+00:00"))).total_seconds()) >= 6 * 3600
+                   for other in unique):
+                unique.append(item)
+            if len(unique) == 12:
+                break
+        with _jobs_lock:
+            _jobs[job_id].update(status="completed", progress=1.0, result={
+                "start_utc": timestamp_text(start), "search_days": data.search_days,
+                "duration_hours": data.duration_hours, "daily": daily, "ranked": unique,
+                "feasible_days": sum(item["feasible"] for item in daily),
+                "landing_uncertainty_m": data.landing_uncertainty_m,
+                "horizon_coverage_min_km": min(profile["far_coverage_min_km"] for profile in profiles),
+                "sample_step_minutes": round(hours / steps * 60, 2),
+                "model": "Terrain-aware visibility of any part of each disk; 5 m DEM near the site where available and 80 m DEM farther out. Landing uncertainty uses the maximum sampled horizon angle from the center and eight edge positions as a screening approximation. Every day is screened at its starting time and refined hourly; the chart shows each day's best sampled arrival. Rankings prioritize meeting both outage limits, then least relative exceedance, most simultaneous visibility, and shorter outages. Visibility is not landing safety, power, or a confirmed communications link."})
+    except Exception as exc:
+        with _jobs_lock:
+            _jobs[job_id].update(status="failed", error=str(exc))
+
+
 def compute_region(job_id: str, data: RegionRequest) -> None:
     try:
         spacing = max(100.0, data.radius_m / 20)
@@ -333,9 +452,21 @@ def compute_region(job_id: str, data: RegionRequest) -> None:
         eligible &= least_daily_earth >= data.min_daily_earth_hours
         eligible &= np.all(np.isfinite(horizon), axis=1)
         eligible &= ~(too_steep | too_rough)
+        lookup = {cell: index for index, cell in enumerate(cells)}
+        covered = np.all(np.isfinite(horizon), axis=1)
+        if data.landing_uncertainty_m > 0:
+            reach = math.ceil(data.landing_uncertainty_m / spacing)
+            offsets = [(dr, dc) for dr in range(-reach, reach + 1)
+                       for dc in range(-reach, reach + 1)
+                       if math.hypot(dr, dc) * spacing <= data.landing_uncertainty_m + 0.001]
+            footprint = eligible.copy()
+            eligible = np.array([
+                all((neighbor := lookup.get((row + dr, col + dc))) is not None and footprint[neighbor]
+                    for dr, dc in offsets)
+                for row, col in cells], dtype=bool)
         mission_needs = (data.max_no_sun_hours is not None or data.max_no_earth_hours is not None
                          or data.min_daily_earth_hours > 0 or data.max_slope_deg is not None
-                         or data.max_roughness_m is not None)
+                         or data.max_roughness_m is not None or data.landing_uncertainty_m > 0)
         if mission_needs:
             near = np.ones(len(positions), dtype=bool)
             if data.max_no_sun_hours is not None:
@@ -347,14 +478,14 @@ def compute_region(job_id: str, data: RegionRequest) -> None:
             bands = np.where(eligible, "green", np.where(near & ~(too_steep | too_rough), "yellow", "red"))
         else:
             bands = np.where(score >= 70, "green", np.where(score >= 35, "yellow", "red"))
-        lookup = {cell: index for index, cell in enumerate(cells)}
-        covered = np.all(np.isfinite(horizon), axis=1)
         cell_area = spacing ** 2 / 1_000_000
         side = max(2, math.ceil(math.sqrt(data.min_area_km2 / cell_area)))
         proposals = []
         for row, col in cells:
             group = [lookup.get((row + dr, col + dc)) for dr in range(side) for dc in range(side)]
             if any(index is None or not covered[index] or too_steep[index] or too_rough[index] for index in group):
+                continue
+            if data.landing_uncertainty_m > 0 and not any(eligible[index] for index in group):
                 continue
             quality = float(np.percentile(score[group], 25))
             meeting = float(np.mean(eligible[group])) if mission_needs else 1.0
@@ -417,6 +548,8 @@ def compute_region(job_id: str, data: RegionRequest) -> None:
                                  result={"regions": displayed, "grid": grid, "sample_count": steps,
                                          "grid_spacing_m": spacing, "evaluated_cells": len(positions),
                                          "outside_coverage_cells": outside_coverage,
+                                         "landing_uncertainty_m": data.landing_uncertainty_m,
+                                         "uncertainty_resolution_limited": 0 < data.landing_uncertainty_m < spacing,
                                          "slope_limit_deg": data.max_slope_deg,
                                          "slope_screened_cells": int(np.count_nonzero(slope_known)) if data.max_slope_deg is not None else None,
                                          "slope_5m_cells": sum(item is not None and item["resolution_m"] == 5 for item in slope_results) if data.max_slope_deg is not None else None,
@@ -430,7 +563,7 @@ def compute_region(job_id: str, data: RegionRequest) -> None:
                                          "roughness_excluded_cells": int(np.count_nonzero(too_rough)) if data.max_roughness_m is not None else None,
                                          "surface_measured_cells": int(np.count_nonzero(roughness_known)),
                                          "color_mode": "mission_needs" if mission_needs else "relative_visibility",
-                                         "model": "Nonoverlapping sampled patches ranked by entered limits, terrain-filter coverage, then lower-quartile weighted visibility; 80 m DEM horizon. Roughness is RMS elevation residual after a plane fit within 400 m"})
+                                         "model": "Nonoverlapping sampled patches ranked by entered limits, terrain-filter coverage, then lower-quartile weighted visibility; uncertainty requires all sampled grid cells within the radius to pass; 80 m DEM horizon. Roughness is RMS elevation residual after a plane fit within 400 m"})
     except Exception as exc:
         with _jobs_lock:
             _jobs[job_id].update(status="failed", error=str(exc))
@@ -442,7 +575,7 @@ def start_region(data: RegionRequest):
            round(data.radius_m, 1), timestamp_text(data.arrival_utc),
            round(data.duration_hours, 4), data.sun_weight, data.max_no_sun_hours,
            data.max_no_earth_hours, data.min_daily_earth_hours, data.min_area_km2,
-           data.max_slope_deg, data.max_roughness_m, "regions-v8")
+           data.max_slope_deg, data.max_roughness_m, data.landing_uncertainty_m, "regions-v9")
     with _jobs_lock:
         existing = _keys.get(key)
         if not data.recalculate and existing and existing in _jobs and _jobs[existing]["status"] != "failed":
@@ -452,6 +585,23 @@ def start_region(data: RegionRequest):
         _jobs[job_id] = {"id": job_id, "status": "running", "progress": 0.0,
                          "result": None, "error": None}
     executor.submit(compute_region, job_id, data)
+    return {"id": job_id, "status": "running"}
+
+
+@router.post("/windows/jobs", status_code=202)
+def start_window_search(data: WindowSearchRequest):
+    key = ("windows", round(data.latitude, 6), round(data.longitude, 6),
+           timestamp_text(data.arrival_utc), round(data.duration_hours, 4), data.search_days,
+           data.max_no_sun_hours, data.max_no_earth_hours, data.landing_uncertainty_m, "windows-v1")
+    with _jobs_lock:
+        existing = _keys.get(key)
+        if not data.recalculate and existing and existing in _jobs and _jobs[existing]["status"] != "failed":
+            return {"id": existing, "status": _jobs[existing]["status"]}
+        job_id = str(uuid4())
+        _keys[key] = job_id
+        _jobs[job_id] = {"id": job_id, "status": "running", "progress": 0.0,
+                         "result": None, "error": None}
+    executor.submit(compute_window_search, job_id, data)
     return {"id": job_id, "status": "running"}
 
 

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import NumericInput from "./NumericInput";
+import { ChevronRight } from "lucide-react";
 
 type Site = { id: string; name: string; latitude: number; longitude: number };
 export type ResilienceProject = { id: string; name: string; arrival_utc: string; duration_hours: number;
@@ -210,37 +211,55 @@ export default function ResilienceExplorer({ projects, initialProjectId }: {
   const sameWindow = result?.baseline.start === result?.scenario.start && result?.baseline.hours === result?.scenario.hours;
   const sunDelta = result ? result.scenario.data.sun.visible_percent - result.baseline.data.sun.visible_percent : 0;
   const earthDelta = result ? result.scenario.data.earth.visible_percent - result.baseline.data.earth.visible_percent : 0;
+  const scenarioDelay = Number.isFinite(dateValue(baselineStart).getTime()) && Number.isFinite(dateValue(scenarioStart).getTime())
+    ? Math.round((dateValue(scenarioStart).getTime() - dateValue(baselineStart).getTime()) / 86400000) : null;
 
   return <div className="orbis-explore mx-auto max-w-[1200px] space-y-3 pb-3 text-xs leading-relaxed">
+    <div><h3 className="text-base font-semibold text-white">Mission resilience</h3>
+      <p className="mt-1 text-[#aaa]">Compare your original mission with a different landing date or location.</p></div>
     {!projects.length ? <section className="orbis-panel p-3 text-[#aaa]">Create a project in Candidate search to compare mission scenarios.</section> : <>
+      <label className={label}>Select project<select className={input} value={projectId} onChange={event => chooseProject(event.target.value)}>
+        {projects.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+      </select></label>
+      <div className="grid gap-3 min-[640px]:grid-cols-2">
+        <section className="orbis-panel min-w-0 space-y-3 p-3">
+          <div className="text-[10px] font-medium uppercase tracking-wide text-[#aaa]">● Baseline</div>
+          <h4 className="text-sm font-semibold text-white">Original mission</h4>
+          <div><div className="text-[#aaa]">Arrival · UTC</div><div className="mt-1 font-mono text-white">{baselineStart.replace("T", " ")} UTC</div></div>
+          <div className="border-t border-[#444] pt-3"><div className="text-[#aaa]">Duration</div><div className="mt-1 text-white">{baselineHours} hours</div></div>
+          <div><div className="text-[#aaa]">Landing location</div><div className="mt-1 truncate text-white">{location(baselineSiteId)?.name ?? "Project center"}</div></div>
+          <details className="group border-t border-[#444] pt-2 text-[#aaa]"><summary className="flex cursor-pointer list-none items-center gap-2 px-2 py-1 text-accent [&::-webkit-details-marker]:hidden"><ChevronRight size={14} className="shrink-0 transition-transform group-open:rotate-90" />Adjust baseline</summary>
+            <div className="mt-3 space-y-3">
+              <label className={label}>Location<select className={input} value={baselineSiteId} onChange={event => setBaselineSiteId(event.target.value)}>
+                <option value="center">Project center</option>{project?.sites.map(site => <option key={site.id} value={site.id}>{site.name}</option>)}
+              </select></label>
+              <label className={label}>Arrival · UTC<input className={input} type="datetime-local" value={baselineStart} onChange={event => setBaselineStart(event.target.value)} /></label>
+              <label className={label}>Duration · hours<NumericInput className={input} min={1} max={8760} step={1} value={baselineHours} onValueChange={setBaselineHours} /></label>
+            </div>
+          </details>
+        </section>
+        <section className="min-w-0 space-y-3 border border-accent bg-[#2a2c2e] p-3">
+          <div className="text-[10px] font-medium uppercase tracking-wide text-accent">● Scenario</div>
+          <h4 className="text-sm font-semibold text-white">Alternative mission</h4>
+          <div><div className="text-[#aaa]">Arrival · UTC</div><div className="mt-1 font-mono text-white">{scenarioStart.replace("T", " ")} UTC</div></div>
+          <div className="border-t border-[#444] pt-3"><div className="text-[#aaa]">Duration</div><div className="mt-1 text-white">{scenarioHours} hours{scenarioDelay !== null ? ` · ${scenarioDelay >= 0 ? "+" : ""}${scenarioDelay} days` : ""}</div></div>
+          <div><div className="text-[#aaa]">Landing location</div><div className="mt-1 truncate text-white">{location(scenarioSiteId)?.name ?? "Choose a location"}</div></div>
+        </section>
+      </div>
       <section className="orbis-panel space-y-3 p-3">
-        <div className="font-medium text-white">Baseline mission</div>
-        <p className="text-[#aaa]">Start with a saved project. This comparison does not change its schedule or sites.</p>
-        <div className="grid gap-3 min-[540px]:grid-cols-2">
-          <label className={label}>Project<select className={input} value={projectId} onChange={event => chooseProject(event.target.value)}>
-            {projects.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
-          </select></label>
-          <label className={label}>Baseline location<select className={input} value={baselineSiteId} onChange={event => setBaselineSiteId(event.target.value)}>
-            <option value="center">Project center</option>
-            {project?.sites.map(site => <option key={site.id} value={site.id}>{site.name}</option>)}
-          </select></label>
-          <label className={label}>Arrival · UTC<input className={input} type="datetime-local" value={baselineStart} onChange={event => setBaselineStart(event.target.value)} /></label>
-          <label className={label}>Duration · hours<NumericInput className={input} min={1} max={8760} step={1} value={baselineHours} onValueChange={setBaselineHours} /></label>
-        </div>
-      </section>
-      <section className="orbis-panel space-y-3 p-3">
-        <div className="font-medium text-white">What if…</div>
-        <div className="flex flex-wrap gap-1">
+        <h4 className="text-sm font-semibold text-white">Adjust scenario</h4>
+        <div className="text-[#aaa]">Shift arrival by</div>
+        <div className="grid grid-cols-2 gap-1 min-[540px]:grid-cols-4">
           {[0, 7, 14, 21].map(days => <button type="button" key={days}
             onClick={() => { const date = dateValue(baselineStart); if (Number.isFinite(date.getTime())) setScenarioStart(new Date(date.getTime() + days * 86400000).toISOString().slice(0, 16)); }}
-            className="min-h-8 border border-[#555] px-2 text-[#ddd] hover:bg-[#383838]">{days ? `+${days} days` : "Same arrival"}</button>)}
+            className={`min-h-9 px-2 ${scenarioDelay === days ? "bg-[#303b40] font-medium text-accent" : "text-[#bbb] hover:bg-[#383838]"}`}>
+            {days ? `+${days} days` : "Same arrival"}</button>)}
         </div>
         <div className="grid gap-3 min-[540px]:grid-cols-2">
           <label className={label}>Scenario arrival · UTC<input className={input} type="datetime-local" value={scenarioStart} onChange={event => setScenarioStart(event.target.value)} /></label>
-          <label className={label}>Scenario duration · hours<NumericInput className={input} min={1} max={8760} step={1} value={scenarioHours} onValueChange={setScenarioHours} /></label>
-          <label className={label}>Scenario location<select className={input} value={scenarioSiteId} onChange={event => setScenarioSiteId(event.target.value)}>
-            <option value="center">Project center</option>
-            {project?.sites.map(site => <option key={site.id} value={site.id}>{site.name}</option>)}
+          <label className={label}>Duration · hours<NumericInput className={input} min={1} max={8760} step={1} value={scenarioHours} onValueChange={setScenarioHours} /></label>
+          <label className={`${label} min-[540px]:col-span-2`}>Scenario location<select className={input} value={scenarioSiteId} onChange={event => setScenarioSiteId(event.target.value)}>
+            <option value="center">Project center</option>{project?.sites.map(site => <option key={site.id} value={site.id}>{site.name}</option>)}
             <option value="custom">Nearby point · coordinates</option>
           </select></label>
         </div>
@@ -256,7 +275,7 @@ export default function ResilienceExplorer({ projects, initialProjectId }: {
       </button>
       {error && <p role="alert" className="text-[#ef9292]">{error}</p>}
       {result && <section className="orbis-panel space-y-3 p-3">
-        <div className="font-medium text-white">Scenario difference</div>
+        <div className="font-medium text-white">Comparison results</div>
         <div className="grid gap-2 min-[560px]:grid-cols-2">
           {[result.baseline, result.scenario].map((item, index) => <div key={index} className="min-w-0 bg-[#343434] p-2 text-[#bbb]">
             <div className="font-medium text-white">{index ? "What if" : "Baseline"} · {item.name}</div>

@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from pyproj import Transformer
 from rasterio.enums import Resampling
 from rasterio.windows import Window, from_bounds
+from rasterio.transform import from_bounds as transform_from_bounds
 from rasterio.warp import reproject
 
 router = APIRouter(prefix="/api/terrain", tags=["Terrain"])
@@ -403,6 +404,55 @@ def terrain_preview(layer: str):
     try:
         return Response(render_layer(layer), media_type="image/png",
                         headers={"Cache-Control": "no-cache"})
+    except (OSError, KeyError, ValueError) as exc:
+        raise HTTPException(503, str(exc)) from exc
+
+
+@router.get("/closeup")
+def terrain_closeup(latitude: float = Query(ge=-90, le=-80),
+                    longitude: float = Query(ge=-180, le=180),
+                    span_m: float = Query(ge=1000, le=30000)):
+    try:
+        size = 512
+        with elevation_dataset() as reference:
+            forward = Transformer.from_crs(reference.crs.geodetic_crs, reference.crs, always_xy=True)
+            x, y = forward.transform(longitude, latitude)
+            bounds, px, py, radius = geometry(reference)
+            if not coordinates_in_coverage(x, y, px, py, radius):
+                raise HTTPException(400, "Outside south-pole coverage")
+            transform = transform_from_bounds(x - span_m / 2, y - span_m / 2,
+                                              x + span_m / 2, y + span_m / 2, size, size)
+            values = np.full((size, size), -9999, dtype=np.float32)
+            with rasterio.open(dataset_path("hillshade")) as source:
+                reproject(source=rasterio.band(source, 1), destination=values,
+                          src_transform=source.transform, src_crs=source.crs,
+                          src_nodata=source.nodata, dst_transform=transform,
+                          dst_crs=reference.crs, dst_nodata=-9999,
+                          resampling=Resampling.bilinear)
+            config = json.loads((DATA / "datasets.json").read_text(encoding="utf-8"))
+            filename = config.get("high_resolution", {}).get("hillshade")
+            high_path = DATA / "source" / filename if filename else None
+            if high_path is not None and high_path.is_file():
+                fine = np.full((size, size), -9999, dtype=np.float32)
+                with rasterio.open(high_path) as source:
+                    reproject(source=rasterio.band(source, 1), destination=fine,
+                              src_transform=source.transform, src_crs=source.crs,
+                              src_nodata=source.nodata, dst_transform=transform,
+                              dst_crs=reference.crs, dst_nodata=-9999,
+                              resampling=Resampling.bilinear)
+                fine_valid = np.isfinite(fine) & (fine != -9999)
+                values[fine_valid] = fine[fine_valid]
+            valid = np.isfinite(values) & (values != -9999)
+            pixels = np.zeros((size, size, 4), dtype=np.uint8)
+            if valid.any():
+                low, high = np.percentile(values[valid], [2, 98])
+                gray = np.clip((values - low) * 255 / max(high - low, 1), 0, 255).astype(np.uint8)
+                pixels[:, :, :3] = gray[:, :, None]
+                pixels[:, :, 3] = np.where(valid, 255, 0).astype(np.uint8)
+            output = io.BytesIO()
+            Image.fromarray(pixels, "RGBA").save(output, format="PNG")
+            return Response(output.getvalue(), media_type="image/png",
+                            headers={"Cache-Control": "private, max-age=300"})
     except (OSError, KeyError, ValueError) as exc:
         raise HTTPException(503, str(exc)) from exc
 

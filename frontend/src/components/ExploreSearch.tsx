@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { SearchGridCell, SearchRegion } from "./VisibilityStatistics";
 import NumericInput from "./NumericInput";
+import TerrainCloseup from "./TerrainCloseup";
+import { ChevronDown } from "lucide-react";
 
 type Area = { latitude: number; longitude: number; radius_m: number };
 type Result = { regions: SearchRegion[]; grid: SearchGridCell[]; grid_spacing_m: number;
@@ -10,16 +12,17 @@ type Result = { regions: SearchRegion[]; grid: SearchGridCell[]; grid_spacing_m:
   slope_unchecked_cells?: number | null; slope_excluded_cells?: number | null; slope_warning?: string | null;
   roughness_limit_m?: number | null; roughness_screened_cells?: number | null;
   roughness_unchecked_cells?: number | null; roughness_excluded_cells?: number | null;
-  surface_measured_cells?: number };
+  surface_measured_cells?: number; landing_uncertainty_m?: number; uncertainty_resolution_limited?: boolean };
 type Job = { status: "running" | "completed" | "failed"; progress: number; result: Result | null; error: string | null };
 type Props = { area: Area; onAreaChange: (area: Area) => void;
+  uncertainty: number; onUncertaintyChange: (value: number) => void;
   onRegions: (areas: SearchRegion[], grid: SearchGridCell[], spacing: number) => void;
   onCreateProject: (name: string, latitude: number, longitude: number, radius: number, arrival: string, duration: number,
     siteLatitude: number, siteLongitude: number) => Promise<void> };
 
 const tone = { green: "#60ba7b", yellow: "#ff9900", red: "#da0004" };
 
-export default function ExploreSearch({ area, onAreaChange, onRegions, onCreateProject }: Props) {
+export default function ExploreSearch({ area, onAreaChange, onRegions, onCreateProject, uncertainty, onUncertaintyChange }: Props) {
   const [center, setCenter] = useState(() => ({ latitude: String(area.latitude), longitude: String(area.longitude), radius: String(area.radius_m / 1000) }));
   const [arrival, setArrival] = useState(() => new Date().toISOString().slice(0, 16));
   const [duration, setDuration] = useState("336");
@@ -50,7 +53,7 @@ export default function ExploreSearch({ area, onAreaChange, onRegions, onCreateP
     setSuggestions([]);
     currentSearch.current = null;
     onRegions([], [], 0);
-  }, [arrival, duration, sunLimit, earthLimit, dailyEarth, minArea, slopeLimit, roughnessLimit]);
+  }, [arrival, duration, sunLimit, earthLimit, dailyEarth, minArea, slopeLimit, roughnessLimit, uncertainty]);
   useEffect(() => {
     if (requestedArea.current?.latitude === area.latitude &&
       requestedArea.current?.longitude === area.longitude &&
@@ -147,7 +150,7 @@ export default function ExploreSearch({ area, onAreaChange, onRegions, onCreateP
     const body = { ...searchArea,
       arrival_utc: date.toISOString(), duration_hours: hours, max_no_sun_hours: sun,
       max_no_earth_hours: earth, min_daily_earth_hours: daily, min_area_km2: minimum,
-      max_slope_deg: slope, max_roughness_m: roughness, sun_weight: 50 };
+      max_slope_deg: slope, max_roughness_m: roughness, landing_uncertainty_m: uncertainty, sun_weight: 50 };
     setError("");
     setRunning(true);
     setResult(null);
@@ -213,10 +216,10 @@ export default function ExploreSearch({ area, onAreaChange, onRegions, onCreateP
   const input = "mt-1 block h-9 w-full min-w-0 border border-[#555] bg-[#292929] px-2 text-xs font-normal text-white outline-none focus:border-accent [color-scheme:dark]";
   const label = "block min-w-0 text-xs text-[#aaa]";
   return <div className="orbis-explore mx-auto max-w-[1200px] space-y-3 pb-3 text-xs leading-relaxed">
-    <p className="text-[#aaa]">Find candidate areas before creating a project.</p>
+    <div><h3 className="text-base font-semibold text-white">Find a landing region</h3>
+      <p className="mt-1 text-[#aaa]">Discover lunar locations that meet your mission requirements.</p></div>
     <section className="orbis-panel space-y-3 p-3">
       <h3 className="font-medium text-white">Search area</h3>
-      <p className="text-[#aaa]">Click the map or drag the white circle to move the area.</p>
       <div className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2">
         <label className={label}>Latitude
           <NumericInput className={input} type="text" inputMode="decimal" min={-90} max={-80} increment={0.0001} value={center.latitude}
@@ -231,6 +234,7 @@ export default function ExploreSearch({ area, onAreaChange, onRegions, onCreateP
         <NumericInput className={input} type="text" inputMode="decimal" min={0.05} max={20} increment={0.1} value={center.radius}
           onValueChange={value => { setCenter(old => ({ ...old, radius: value })); invalidate(); }}
           onStep={value => commitCenter({ ...center, radius: value })} onBlur={() => commitCenter()} /></label>
+      <p className="text-[11px] text-[#aaa]">Click the lunar map or drag the white search circle to move this area.</p>
     </section>
     <section className="orbis-panel space-y-3 p-3"><h3 className="font-medium text-white">Mission timing</h3>
       <div className="grid grid-cols-1 gap-3 min-[440px]:grid-cols-2">
@@ -241,23 +245,46 @@ export default function ExploreSearch({ area, onAreaChange, onRegions, onCreateP
       </div>
     </section>
     <section className="orbis-panel space-y-3 p-3">
-      <h3 className="font-medium text-white">Filters</h3>
-      <p className="text-[#aaa]">Set both outage limits. Add contact, area, slope, or roughness requirements if needed.</p>
-      <div className="grid grid-cols-1 gap-4 min-[440px]:grid-cols-2">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div><h3 className="font-medium text-white">Landing uncertainty</h3>
+          <p className="mt-1 text-[#aaa]">Possible deviation from the intended landing point.</p></div>
+        <span className="bg-[#3b4246] px-2 py-1 font-mono text-white">{uncertainty.toLocaleString()} m</span>
+      </div>
+      <TerrainCloseup latitude={area.latitude} longitude={area.longitude} uncertaintyM={uncertainty} />
+      <input type="range" min={0} max={5000} step={100} value={uncertainty}
+        onChange={event => onUncertaintyChange(Number(event.target.value))}
+        aria-label="Landing uncertainty radius in metres" className="w-full accent-accent" />
+      <div className="flex justify-between text-[10px] text-[#aeb8bd]"><span>0 m</span><span>5,000 m</span></div>
+      <p className="text-[11px] text-[#aaa]">This preview is centered on the search area. Each candidate is screened across its own uncertainty radius using sampled terrain and visibility; detail below the search grid spacing remains unresolved.</p>
+    </section>
+    <details className="orbis-panel group" open>
+      <summary className="flex cursor-pointer list-none items-center justify-between p-3 font-medium text-white [&::-webkit-details-marker]:hidden">
+        <span>Mission requirements <span className="mt-1 block text-[11px] font-normal text-[#aaa]">Maximum darkness and Earth interruption</span></span>
+        <ChevronDown size={16} className="shrink-0 text-accent transition-transform group-open:rotate-180" />
+      </summary>
+      <div className="grid grid-cols-1 gap-3 border-t border-[#454b50] p-3 min-[440px]:grid-cols-2">
         <label className={label}>Longest darkness <span className="text-[#999]">· h</span>
           <NumericInput className={input} min={0} max={8760} step="any" increment={1} required placeholder="Hours" value={sunLimit} onValueChange={setSunLimit} /></label>
         <label className={label}>Longest Earth outage <span className="text-[#999]">· h</span>
           <NumericInput className={input} min={0} max={8760} step="any" increment={1} required placeholder="Hours" value={earthLimit} onValueChange={setEarthLimit} /></label>
-        <label className={label}>Earth contact / day <span className="text-[#999]">· h, optional</span>
-          <NumericInput className={input} min={0} max={24} step="0.5" placeholder="No minimum" value={dailyEarth} onValueChange={setDailyEarth} /></label>
-        <label className={label}>Minimum candidate area <span className="text-[#999]">· km², optional</span>
-          <NumericInput className={input} min={0.001} max={1000} step="any" increment={0.1} placeholder="Auto" value={minArea} onValueChange={setMinArea} /></label>
-        <label className={label}>Maximum local slope <span className="text-[#999]">· °, optional</span>
-          <NumericInput className={input} min={0} max={90} step="any" increment={0.5} placeholder="No slope filter" value={slopeLimit} onValueChange={setSlopeLimit} /></label>
-        <label className={label}>Maximum roughness <span className="text-[#999]">· m, optional</span>
-          <NumericInput className={input} min={0} max={1000} step="any" increment={0.1} placeholder="No roughness filter" value={roughnessLimit} onValueChange={setRoughnessLimit} /></label>
       </div>
-    </section>
+      <details className="group/advanced border-t border-[#454b50]">
+        <summary className="flex cursor-pointer list-none items-center justify-between p-3 font-medium text-white [&::-webkit-details-marker]:hidden">
+          <span>Advanced terrain filters <span className="mt-1 block text-[11px] font-normal text-[#aaa]">Slope, roughness, candidate area and daily contact</span></span>
+          <ChevronDown size={16} className="shrink-0 text-accent transition-transform group-open/advanced:rotate-180" />
+        </summary>
+        <div className="grid grid-cols-1 gap-3 border-t border-[#454b50] p-3 min-[440px]:grid-cols-2">
+          <label className={label}>Earth contact / day <span className="text-[#999]">· h, optional</span>
+            <NumericInput className={input} min={0} max={24} step="0.5" placeholder="No minimum" value={dailyEarth} onValueChange={setDailyEarth} /></label>
+          <label className={label}>Minimum candidate area <span className="text-[#999]">· km², optional</span>
+            <NumericInput className={input} min={0.001} max={1000} step="any" increment={0.1} placeholder="Auto" value={minArea} onValueChange={setMinArea} /></label>
+          <label className={label}>Maximum local slope <span className="text-[#999]">· °, optional</span>
+            <NumericInput className={input} min={0} max={90} step="any" increment={0.5} placeholder="No slope filter" value={slopeLimit} onValueChange={setSlopeLimit} /></label>
+          <label className={label}>Maximum roughness <span className="text-[#999]">· m, optional</span>
+            <NumericInput className={input} min={0} max={1000} step="any" increment={0.1} placeholder="No roughness filter" value={roughnessLimit} onValueChange={setRoughnessLimit} /></label>
+        </div>
+      </details>
+    </details>
     <button type="button" disabled={running} onClick={() => void search()}
       className="min-h-10 w-full bg-accent px-3 py-2 text-xs font-medium text-white transition-[filter] hover:brightness-90 disabled:cursor-wait disabled:opacity-50">{running ? progress || "Calculating…" : "Search candidate areas"}</button>
     {error && <p role="alert" className="text-[#ef9292]">{error}</p>}
@@ -265,6 +292,7 @@ export default function ExploreSearch({ area, onAreaChange, onRegions, onCreateP
       <div className="flex flex-wrap items-end justify-between gap-2"><h3 className="font-medium text-white">Candidate areas</h3>
         <span className="text-[11px] text-[#aeb6ba]">{result.evaluated_cells} sampled cells · {result.grid_spacing_m} m grid</span></div>
       {result.surface_measured_cells !== undefined && <p className="text-[11px] text-[#aeb6ba]">Coarse surface measurements available at {result.surface_measured_cells} of {result.evaluated_cells} sampled cells.</p>}
+      {result.uncertainty_resolution_limited && <p className="text-[11px] text-[#ffbf70]">Landing uncertainty is smaller than the {Math.round(result.grid_spacing_m)} m search grid. Variations between sampled cells cannot be checked.</p>}
       <p className="text-[11px] text-[#aeb6ba]">{result.color_mode === "mission_needs" ? "Green meets entered limits; yellow is close; red misses them." : "Green ≥70%, yellow ≥35%, red <35% by weighted visibility."} Gray marks missing DEM or unchecked terrain limits. Colors are screening estimates, not landing safety.</p>
       {result.outside_coverage_cells > 0 && <p className="text-[11px] text-[#aeb6ba]">{result.outside_coverage_cells} cells outside map coverage.</p>}
       {result.slope_limit_deg != null && <p className="text-[11px] text-[#aeb6ba]">Slope ≤{result.slope_limit_deg}°: {result.slope_screened_cells} screened ({result.slope_5m_cells} at 5 m, {result.slope_80m_cells} at 80 m), {result.slope_excluded_cells} too steep, {result.slope_unchecked_cells} unchecked. Missing slope data skips this filter for those cells.</p>}
