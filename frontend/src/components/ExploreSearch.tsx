@@ -14,15 +14,17 @@ type Result = { regions: SearchRegion[]; grid: SearchGridCell[]; grid_spacing_m:
   roughness_unchecked_cells?: number | null; roughness_excluded_cells?: number | null;
   surface_measured_cells?: number; landing_uncertainty_m?: number; uncertainty_resolution_limited?: boolean };
 type Job = { status: "running" | "completed" | "failed"; progress: number; result: Result | null; error: string | null };
+type Prefill = { revision: number; arrival: string; duration: number; darkness: number; earthOutage: number } | null;
 type Props = { area: Area; onAreaChange: (area: Area) => void;
   uncertainty: number; onUncertaintyChange: (value: number) => void;
+  prefill: Prefill;
   onRegions: (areas: SearchRegion[], grid: SearchGridCell[], spacing: number) => void;
   onCreateProject: (name: string, latitude: number, longitude: number, radius: number, arrival: string, duration: number,
     siteLatitude: number, siteLongitude: number) => Promise<void> };
 
 const tone = { green: "#60ba7b", yellow: "#ff9900", red: "#da0004" };
 
-export default function ExploreSearch({ area, onAreaChange, onRegions, onCreateProject, uncertainty, onUncertaintyChange }: Props) {
+export default function ExploreSearch({ area, onAreaChange, onRegions, onCreateProject, uncertainty, onUncertaintyChange, prefill }: Props) {
   const [center, setCenter] = useState(() => ({ latitude: String(area.latitude), longitude: String(area.longitude), radius: String(area.radius_m / 1000) }));
   const [arrival, setArrival] = useState(() => new Date().toISOString().slice(0, 16));
   const [duration, setDuration] = useState("336");
@@ -46,6 +48,18 @@ export default function ExploreSearch({ area, onAreaChange, onRegions, onCreateP
   useEffect(() => () => controller.current?.abort(), []);
   useEffect(() => setCenter({ latitude: String(area.latitude), longitude: String(area.longitude), radius: String(area.radius_m / 1000) }),
     [area.latitude, area.longitude, area.radius_m]);
+  useEffect(() => {
+    if (!prefill) return;
+    setArrival(prefill.arrival.slice(0, 16));
+    setDuration(String(prefill.duration));
+    setSunLimit(String(prefill.darkness));
+    setEarthLimit(String(prefill.earthOutage));
+    setDailyEarth("");
+    setMinArea("");
+    setSlopeLimit("");
+    setRoughnessLimit("");
+    setError("");
+  }, [prefill?.revision]);
   useEffect(() => {
     controller.current?.abort();
     setRunning(false);
@@ -218,6 +232,7 @@ export default function ExploreSearch({ area, onAreaChange, onRegions, onCreateP
   return <div className="orbis-explore mx-auto max-w-[1200px] space-y-3 pb-3 text-xs leading-relaxed">
     <div><h3 className="text-base font-semibold text-white">Find a landing region</h3>
       <p className="mt-1 text-[#aaa]">Discover lunar locations that meet your mission requirements.</p></div>
+    {prefill && <p className="border-l-2 border-accent bg-[#303b40] p-2 text-[11px] text-[#d5e7ed]">Landing-window inputs loaded. Run Search candidate areas below. This search requires a contiguous candidate area and screens 80 m DEM horizons at roughly two-hour steps; Landing Windows evaluates a selected site with finer timing and 5 m terrain where covered. Their results can differ.</p>}
     <section className="orbis-panel space-y-3 p-3">
       <h3 className="font-medium text-white">Search area</h3>
       <div className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2">

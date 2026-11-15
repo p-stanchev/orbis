@@ -12,13 +12,14 @@ type Result = { start_utc: string; search_days: number; duration_hours: number; 
   horizon_coverage_min_km: number; sample_step_minutes: number; model: string };
 type Props = { projects: Project[]; initialProjectId?: string; initialSiteId?: string; uncertaintyM: number;
   onInspect: (projectId: string, siteId: string, arrival: string, duration: number) => void;
-  onApply: (projectId: string, siteId: string, arrival: string, duration: number) => Promise<void> };
+  onApply: (projectId: string, siteId: string, arrival: string, duration: number) => Promise<void>;
+  onSearchArea: (latitude: number, longitude: number, arrival: string, duration: number, darkness: number, earthOutage: number) => void };
 
 const dateText = (value: string) => new Date(value).toISOString().replace("T", " ").slice(0, 16) + " UTC";
 const field = "mt-1 h-9 w-full min-w-0 border border-[#555] bg-[#292929] px-2 text-xs text-white outline-none focus:border-accent [color-scheme:dark]";
 const label = "block min-w-0 text-xs text-[#aaa]";
 
-export default function OptimalLandingWindow({ projects, initialProjectId, initialSiteId, uncertaintyM, onInspect, onApply }: Props) {
+export default function OptimalLandingWindow({ projects, initialProjectId, initialSiteId, uncertaintyM, onInspect, onApply, onSearchArea }: Props) {
   const [projectId, setProjectId] = useState(initialProjectId ?? "");
   const project = projects.find(item => item.id === projectId);
   const [siteId, setSiteId] = useState(initialSiteId ?? "");
@@ -89,13 +90,15 @@ export default function OptimalLandingWindow({ projects, initialProjectId, initi
     return <div key={item.arrival_utc} className="flex flex-wrap items-center justify-between gap-2 border-t border-[#444] py-2.5">
       <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><span className="font-mono text-[11px] text-accent">#{index + 1}</span>
         <strong className="text-xs text-white">{dateText(item.arrival_utc)}</strong>
-        <span className={`text-[11px] ${item.feasible ? "text-[#73bd87]" : "text-[#e4a85e]"}`}>{item.feasible ? "Meets limits" : "Closest alternative"}</span></div>
+        <span className={`text-[11px] ${item.feasible ? "text-[#73bd87]" : "text-[#e4a85e]"}`}>{item.feasible ? "Site meets limits" : "Closest alternative"}</span></div>
         <p className="mt-1 text-[11px] text-[#b9c1c5]">Sun {item.sun_percent.toFixed(1)}% · Earth {item.earth_percent.toFixed(1)}% · Both {item.both_percent.toFixed(1)}%</p>
         <p className="text-[11px] text-[#b9c1c5]">Longest darkness {item.darkness_hours.toFixed(1)} h · Earth outage {item.earth_outage_hours.toFixed(1)} h</p>
         {item.violations.length > 0 && <p className="text-[11px] text-[#e4a85e]">Misses: {item.violations.map(v => `${v.label} ${v.actual_hours.toFixed(1)} h > ${v.limit_hours} h`).join("; ")}</p>}
       </div>
-      <div className="flex shrink-0 gap-1"><button type="button" onClick={() => onInspect(projectId, siteId, item.arrival_utc, Number(duration))}
+      <div className="flex flex-wrap gap-1"><button type="button" onClick={() => onInspect(projectId, siteId, item.arrival_utc, Number(duration))}
         className="flex min-h-9 items-center gap-1 border border-[#596269] px-2 text-[11px] text-white hover:border-accent">Inspect <ArrowUpRight size={13} /></button>
+        <button type="button" onClick={() => site && onSearchArea(site.latitude, site.longitude, item.arrival_utc, Number(duration), Number(darkness), Number(outage))}
+          className="min-h-9 border border-[#596269] px-2 text-[11px] text-white hover:border-accent">Use in candidate search</button>
         <button type="button" disabled={!!saving} onClick={async () => { setSaving(item.arrival_utc); setError(""); try { await onApply(projectId, siteId, item.arrival_utc, Number(duration)); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not save arrival date."); } finally { setSaving(""); } }}
           className="min-h-9 bg-accent px-2 text-[11px] font-medium text-white hover:brightness-90 disabled:opacity-50">{saving === item.arrival_utc ? "Saving…" : "Save to project"}</button></div>
     </div>;
@@ -125,7 +128,7 @@ export default function OptimalLandingWindow({ projects, initialProjectId, initi
           <NumericInput className={field} min={0} max={8760} value={outage} onValueChange={setOutage} /></label></div>
       <button type="button" disabled={busy || !site} onClick={() => void search()}
         className="min-h-10 w-full bg-accent px-3 py-2 font-medium text-white hover:brightness-90 disabled:opacity-50">{busy ? `Searching… ${Math.round(progress * 100)}%` : "Find optimal dates"}</button>
-      <p className="text-[11px] text-[#aeb8bd]">Saving a result changes this project's arrival time and duration for every site in the project. Inspect previews a result without saving it.</p>
+      <p className="text-[11px] text-[#aeb8bd]">Saving changes this project's arrival time and duration for every site. Inspect previews without saving. Use in candidate search fills its area, date, duration, and outage limits so you can check nearby terrain.</p>
     </section>
     {error && <p role="alert" className="text-[#ef9292]">{error}</p>}
     {result && <section className="orbis-panel space-y-3 p-3"><div className="flex flex-wrap items-baseline justify-between gap-2"><h3 className="text-sm font-semibold text-white">Landing opportunities</h3>
@@ -135,7 +138,7 @@ export default function OptimalLandingWindow({ projects, initialProjectId, initi
           onClick={() => onInspect(projectId, siteId, item.arrival_utc, Number(duration))}
           className={`h-12 min-w-[8px] flex-1 ${item.feasible ? "bg-[#70af7d]" : item.violations.length === 1 ? "bg-[#de973e]" : "bg-[#ba3939]"} hover:brightness-125 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent`} aria-label={`Inspect day ${index + 1}, ${dateText(item.arrival_utc)}`} />)}</div>
       <div className="flex justify-between text-[11px] text-[#aaa]"><span>{dateText(result.start_utc)}</span><span>Day {result.search_days}</span></div>
-      <p className="text-[11px] text-[#aaa]">Green meets both limits · amber misses one · red misses both. Select a day to preview it.</p>
+      <p className="text-[11px] text-[#aaa]">Green meets both site limits · amber misses one · red misses both. Select a day to preview it. Candidate Search also requires a qualifying area and may reach a different result.</p>
       {top.length > 0 ? <div><h4 className="font-medium text-white">Top arrival times</h4>{top.map(row)}</div> : <p className="border-t border-[#444] pt-3 text-[#e4a85e]">No sampled arrival meets both limits. These are the closest alternatives, with each missed limit shown below.</p>}
       {alternatives.length > 0 && <div><h4 className="font-medium text-white">Closest alternatives</h4>{alternatives.map((item, index) => row(item, top.length + index))}</div>}
       <details className="border-t border-[#444] pt-2 text-[11px] text-[#aeb8bd]"><summary className="cursor-pointer text-white">Method and limits</summary><p className="mt-2">{result.model}</p>

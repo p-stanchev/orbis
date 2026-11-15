@@ -364,6 +364,7 @@ function App() {
   const [selected, setSelected] = useState<Target | null>(null);
   const [regions, setRegions] = useState<{ projectId: string | null; areas: SearchRegion[]; grid: SearchGridCell[]; spacing: number } | null>(null);
   const [exploreArea, setExploreArea] = useState({ latitude: -85, longitude: 0, radius_m: 10000 });
+  const [candidatePrefill, setCandidatePrefill] = useState<{ revision: number; arrival: string; duration: number; darkness: number; earthOutage: number } | null>(null);
   const [browseWidth, setBrowseWidth] = useState(() => savedWidth(BROWSE_WIDTH_KEY, 240));
   const [inspectorWidth, setInspectorWidth] = useState(() => savedWidth(INSPECTOR_WIDTH_KEY, 280));
   const resizing = useRef<"browse" | "inspector" | null>(null);
@@ -1160,7 +1161,7 @@ function App() {
                   </div>
                 </div>
                 <div id="explore-candidates-panel" role="tabpanel" aria-labelledby="explore-candidates-tab" hidden={exploreMode !== "candidates"}>
-                  <ExploreSearch area={exploreArea} uncertainty={landingUncertainty} onUncertaintyChange={setLandingUncertainty}
+                  <ExploreSearch area={exploreArea} uncertainty={landingUncertainty} onUncertaintyChange={setLandingUncertainty} prefill={candidatePrefill}
                     onAreaChange={area => { setExploreArea(area); setRegions(null); }}
                     onRegions={(areas, grid, spacing) => setRegions({ projectId: null, areas, grid, spacing })}
                     onCreateProject={createFromExplore} />
@@ -1170,7 +1171,13 @@ function App() {
                 </div>
                 <div id="explore-windows-panel" role="tabpanel" aria-labelledby="explore-windows-tab" hidden={exploreMode !== "windows"}>
                   <OptimalLandingWindow projects={projects} initialProjectId={currentProject?.id} initialSiteId={currentSite?.id}
-                    uncertaintyM={landingUncertainty} onInspect={inspectArrival} onApply={applyArrival} />
+                    uncertaintyM={landingUncertainty} onInspect={inspectArrival} onApply={applyArrival}
+                    onSearchArea={(latitude, longitude, arrival, duration, darkness, earthOutage) => {
+                      setExploreArea({ latitude, longitude, radius_m: Math.max(2000, Math.min(20000, landingUncertainty * 2)) });
+                      setRegions(null);
+                      setCandidatePrefill(current => ({ revision: (current?.revision ?? 0) + 1, arrival, duration, darkness, earthOutage }));
+                      setExploreMode("candidates");
+                    }} />
                 </div>
                 </div>
               </div>
