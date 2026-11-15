@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import rasterio
 from fastapi import APIRouter, HTTPException, Query, Response
-from PIL import Image
+from PIL import Image, ImageDraw
 from pydantic import BaseModel, Field
 from pyproj import Transformer
 from rasterio.enums import Resampling
@@ -261,27 +261,110 @@ def terrain_info():
         raise HTTPException(503, str(exc)) from exc
 
 
-@lru_cache(maxsize=2)
+def render_contours(reference, bounds, px, py, radius):
+    grid_size = 512
+    elevation = reference.read(1, out_shape=(grid_size, grid_size),
+                               resampling=Resampling.bilinear, masked=True)
+    values = elevation.data
+    valid = ~np.ma.getmaskarray(elevation) & np.isfinite(values) & (np.abs(values) < 100000)
+    xs = bounds.left + (np.arange(grid_size) + 0.5) * (bounds.right - bounds.left) / grid_size
+    ys = bounds.top - (np.arange(grid_size) + 0.5) * (bounds.top - bounds.bottom) / grid_size
+    valid &= (xs[None, :] - px) ** 2 + (ys[:, None] - py) ** 2 <= radius ** 2
+    image = Image.new("RGBA", (SIZE, SIZE))
+    draw = ImageDraw.Draw(image)
+    corners = (values[:-1, :-1], values[:-1, 1:], values[1:, 1:], values[1:, :-1])
+    cells_valid = valid[:-1, :-1] & valid[:-1, 1:] & valid[1:, 1:] & valid[1:, :-1]
+    minimum = np.minimum.reduce(corners)
+    maximum = np.maximum.reduce(corners)
+    low = int(np.ceil(np.min(values[valid]) / 500)) * 500
+    high = int(np.floor(np.max(values[valid]) / 500)) * 500
+    scale = SIZE / grid_size
+
+    for level in range(low, high + 1, 500):
+        rows, columns = np.nonzero(cells_valid & (minimum <= level) & (maximum >= level))
+        major = level % 2000 == 0
+        color = (190, 220, 229, 170 if major else 92)
+        width = 2 if major else 1
+        for row, column in zip(rows, columns):
+            corner_values = [corner[row, column] for corner in corners]
+            points = []
+            edges = ((0, 1), (1, 2), (2, 3), (3, 0))
+            positions = ((column, row), (column + 1, row),
+                         (column + 1, row + 1), (column, row + 1))
+            for start, end in edges:
+                first, second = corner_values[start], corner_values[end]
+                if (first <= level < second) or (second <= level < first):
+                    fraction = (level - first) / (second - first)
+                    ax, ay = positions[start]
+                    bx, by = positions[end]
+                    points.append(((ax + (bx - ax) * fraction + 0.5) * scale,
+                                   (ay + (by - ay) * fraction + 0.5) * scale))
+            for index in range(0, len(points) - 1, 2):
+                draw.line((points[index], points[index + 1]), fill=color, width=width)
+    output = io.BytesIO()
+    image.save(output, format="PNG")
+    return output.getvalue()
+
+
+@lru_cache(maxsize=4)
 def render_layer(layer: str) -> bytes:
-    role = "hillshade" if layer == "hillshade" else "permanent_shadows"
+    role = {"hillshade": "hillshade", "shadows": "permanent_shadows"}.get(layer)
     with elevation_dataset() as reference:
         bounds, px, py, radius = geometry(reference)
+        if layer == "contours":
+            return render_contours(reference, bounds, px, py, radius)
         output_transform = reference.transform * reference.transform.scale(
             reference.width / SIZE, reference.height / SIZE
         )
-        with rasterio.open(dataset_path(role)) as source:
+        if layer == "slope":
+            elevation = reference.read(1, out_shape=(SIZE, SIZE),
+                                       resampling=Resampling.bilinear, masked=True)
+            heights = elevation.data
+            good = ~np.ma.getmaskarray(elevation) & np.isfinite(heights) & (np.abs(heights) < 100000)
+            neighbors = np.zeros_like(good)
+            neighbors[1:-1, 1:-1] = (good[1:-1, 1:-1] & good[:-2, 1:-1] &
+                                    good[2:, 1:-1] & good[1:-1, :-2] & good[1:-1, 2:])
+            north, east = np.gradient(np.where(good, heights, 0),
+                                      abs(output_transform.e), abs(output_transform.a))
+            coarse = np.rad2deg(np.arctan(np.hypot(north, east)))
+            values = np.where(neighbors, coarse, -9999).astype(np.float32)
+            config = json.loads((DATA / "datasets.json").read_text(encoding="utf-8"))
+            filename = config.get("high_resolution", {}).get("slope")
+            source_path = DATA / "source" / filename if filename else None
+        else:
+            source_path = dataset_path(role)
             values = np.full((SIZE, SIZE), -9999, dtype=np.float32)
-            reproject(
-                source=rasterio.band(source, 1),
-                destination=values,
-                src_transform=source.transform,
-                src_crs=source.crs,
-                src_nodata=source.nodata,
-                dst_transform=output_transform,
-                dst_crs=reference.crs,
-                dst_nodata=-9999,
-                resampling=Resampling.bilinear if layer == "hillshade" else Resampling.nearest,
-            )
+        if source_path is not None and source_path.is_file():
+            with rasterio.open(source_path) as source:
+                if layer == "slope":
+                    destination = np.full((SIZE, SIZE), -9999, dtype=np.float32)
+                else:
+                    destination = values
+                if layer == "slope":
+                    sampled = source.read(1, out_shape=(SIZE, SIZE), masked=True,
+                                          resampling=Resampling.average).filled(-9999)
+                    input_transform = source.transform * source.transform.scale(
+                        source.width / SIZE, source.height / SIZE
+                    )
+                else:
+                    sampled = rasterio.band(source, 1)
+                    input_transform = source.transform
+                reproject(
+                    source=sampled,
+                    destination=destination,
+                    src_transform=input_transform,
+                    src_crs=source.crs,
+                    src_nodata=-9999 if layer == "slope" else source.nodata,
+                    dst_transform=output_transform,
+                    dst_crs=reference.crs,
+                    dst_nodata=-9999,
+                    resampling=Resampling.bilinear if layer in ("slope", "hillshade") else Resampling.nearest,
+                )
+                if layer == "slope":
+                    fine = np.isfinite(destination) & (destination >= 0) & (destination <= 90)
+                    values[fine] = destination[fine]
+        elif layer != "slope":
+            raise FileNotFoundError(f"Missing dataset: {source_path.name}")
 
         xs = bounds.left + (np.arange(SIZE) + 0.5) * (bounds.right - bounds.left) / SIZE
         ys = bounds.top - (np.arange(SIZE) + 0.5) * (bounds.top - bounds.bottom) / SIZE
@@ -296,6 +379,12 @@ def render_layer(layer: str) -> bytes:
                 gray = np.clip((values - low) * 255 / (high - low), 0, 255).astype(np.uint8)
                 pixels[:, :, :3] = gray[:, :, None]
                 pixels[:, :, 3] = np.where(valid, 255, 0).astype(np.uint8)
+        elif layer == "slope":
+            valid &= (values >= 0) & (values <= 90)
+            pixels[valid & (values < 5)] = (63, 180, 204, 105)
+            pixels[valid & (values >= 5) & (values < 15)] = (234, 199, 85, 135)
+            pixels[valid & (values >= 15) & (values < 30)] = (240, 139, 66, 165)
+            pixels[valid & (values >= 30)] = (220, 77, 98, 190)
         else:
             # Positive PSR values are treated as flagged regions; confirm against NASA raster metadata.
             psr = valid & (values > 0)
@@ -309,7 +398,7 @@ def render_layer(layer: str) -> bytes:
 
 @router.get("/preview/{layer}")
 def terrain_preview(layer: str):
-    if layer not in ("hillshade", "shadows"):
+    if layer not in ("hillshade", "shadows", "contours", "slope"):
         raise HTTPException(404, "Unknown terrain layer")
     try:
         return Response(render_layer(layer), media_type="image/png",

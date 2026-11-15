@@ -274,7 +274,7 @@ function MissionSettings({
 
   return (
     <div className="space-y-4 p-3 text-xs">
-      <p className="break-words font-medium text-white" style={{ borderLeft: `3px solid ${project.color}`, paddingLeft: 8 }}>{project.name}</p>
+      <p className="[overflow-wrap:anywhere] font-medium text-white" style={{ borderLeft: `3px solid ${project.color}`, paddingLeft: 8 }}>{project.name}</p>
       <label className="block text-[#aaa]">
         Arrival (UTC)
         <input
@@ -1099,7 +1099,7 @@ function App() {
             </div>
             {deleting ? (
               <p className="p-4">
-                Delete <strong>{targetName(deleting)}</strong>?
+                Delete <strong className="[overflow-wrap:anywhere]">{targetName(deleting)}</strong>?
                 {!deleting.siteId && (
                   <span className="mt-2 block text-xs text-[#aaa]">
                     All its landing sites will also be deleted.

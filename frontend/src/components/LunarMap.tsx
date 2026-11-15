@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent, type WheelEvent } from "react";
-import { Check, Layers, LocateFixed, MapPin, Minus, Moon, Plus, X } from "lucide-react";
+import { Check, Layers, LocateFixed, MapPin, Minus, Moon, Plus, X, ChartNoAxesCombined, Mountain } from "lucide-react";
 import type { SearchRegion, SearchGridCell } from "./VisibilityStatistics";
 import LandmarkCard, { type Landmark } from "./LandmarkCard";
 
@@ -63,6 +63,8 @@ export default function LunarMap({ landmarksEnabled, projects, hiddenProjectIds,
   const [explorePreview, setExplorePreview] = useState<{ u: number; v: number } | null>(null);
   const [point, setPoint] = useState<Point | null>(null);
   const [shadows, setShadows] = useState(false);
+  const [contours, setContours] = useState(false);
+  const [slope, setSlope] = useState(false);
   const [landmarksVisible, setLandmarksVisible] = useState(false);
   const [landmarks, setLandmarks] = useState<Landmark[]>([]);
   const [landmarkMarkers, setLandmarkMarkers] = useState<Marker[]>([]);
@@ -560,6 +562,10 @@ export default function LunarMap({ landmarksEnabled, projects, hiddenProjectIds,
             <img src="/api/terrain/preview/hillshade?v=4" draggable={false} alt="NASA south-pole hillshade"
               className="pointer-events-none absolute inset-0 h-full w-full"
               onError={() => setError("Could not display terrain image.")} />
+            {slope && <img src="/api/terrain/preview/slope?v=2" draggable={false} alt="Slope across the south pole from LOLA elevation and slope rasters"
+              className="pointer-events-none absolute inset-0 h-full w-full" onError={() => setError("Could not display slope layer.")} />}
+            {contours && <img src="/api/terrain/preview/contours?v=1" draggable={false} alt="LOLA elevation contours"
+              className="pointer-events-none absolute inset-0 h-full w-full" onError={() => setError("Could not display contour layer.")} />}
             {shadows && (
               <img src="/api/terrain/preview/shadows?v=4" draggable={false} alt="Permanently shadowed areas"
                 className="pointer-events-none absolute inset-0 h-full w-full" />
@@ -733,11 +739,24 @@ export default function LunarMap({ landmarksEnabled, projects, hiddenProjectIds,
             <MapPin size={15} className="text-[#e78bb6]" /><span className="min-w-0 flex-1">Landmarks</span>
             <span className={`flex h-4 w-4 items-center justify-center rounded-full border ${landmarksVisible ? "border-[#e78bb6] text-[#e78bb6]" : "border-[#778187]"}`}>{landmarksVisible && <Check size={11} />}</span>
           </button>}
+          <div className="my-1.5 border-t border-[#4b555a]" />
+          <button type="button" aria-label="Toggle elevation contours" aria-pressed={contours}
+            onClick={() => setContours(current => !current)} className="flex min-h-9 w-full items-center gap-2 px-1.5 text-left text-[#e0e4e6] hover:bg-[#3a4145]">
+            <ChartNoAxesCombined size={15} className="text-[#bedce5]" /><span className="min-w-0 flex-1">Contours</span>
+            <span className={`flex h-4 w-4 items-center justify-center rounded-full border ${contours ? "border-accent text-accent" : "border-[#778187]"}`}>{contours && <Check size={11} />}</span>
+          </button>
+          <button type="button" aria-label="Toggle slope shading" aria-pressed={slope}
+            onClick={() => setSlope(current => !current)} className="flex min-h-9 w-full items-center gap-2 px-1.5 text-left text-[#e0e4e6] hover:bg-[#3a4145]">
+            <Mountain size={15} className="text-[#f08b42]" /><span className="min-w-0 flex-1">Slope shading</span>
+            <span className={`flex h-4 w-4 items-center justify-center rounded-full border ${slope ? "border-accent text-accent" : "border-[#778187]"}`}>{slope && <Check size={11} />}</span>
+          </button>
         </div>}
-        {(shadows || landmarksEnabled && landmarksVisible || candidateAreasVisible) && <div className="pointer-events-none flex flex-wrap justify-end gap-x-3 gap-y-1 bg-[#242424]/95 px-2 py-1.5 text-[10px] text-[#c5ced2]">
+        {(shadows || contours || slope || landmarksEnabled && landmarksVisible || candidateAreasVisible) && <div className="pointer-events-none flex max-w-[min(340px,100%)] flex-wrap justify-end gap-x-3 gap-y-1 bg-[#242424]/95 px-2 py-1.5 text-[10px] text-[#c5ced2]">
           {shadows && <span className="flex items-center gap-1.5"><span className="h-2 w-2 bg-accent" />PSR</span>}
           {landmarksEnabled && landmarksVisible && <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full border border-[#e78bb6]" />Landmarks</span>}
           {candidateAreasVisible && <span className="flex items-center gap-1.5"><span className="flex gap-0.5"><span className="inline-block h-2 w-2 bg-success" /><span className="inline-block h-2 w-2 bg-warning" /><span className="inline-block h-2 w-2 bg-danger" /></span>Candidates</span>}
+          {contours && <span className="w-full text-right">Contours 500 m · major 2,000 m</span>}
+          {slope && <span className="flex w-full flex-wrap justify-end gap-x-2 gap-y-1"><span>Slope:</span><span className="text-[#6bc4d7]">&lt;5°</span><span className="text-[#eac755]">5–15°</span><span className="text-[#f08b42]">15–30°</span><span className="text-[#dc4d62]">≥30°</span><span className="text-[#aeb8bc]">5 m raster where available · 80 m DEM elsewhere; map-scale view</span></span>}
         </div>}
         {landmarksEnabled && landmarksVisible && landmarkError && <div role="alert" className="bg-[#292929] px-2 py-1 text-xs text-[#ef9292]">{landmarkError}</div>}
       </div>
