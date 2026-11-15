@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Globe2, Sun, Play, Pause } from "lucide-react";
 import TerrainScene, { type CelestialBody, type Ephemeris, type TerrainPatch } from "./TerrainScene";
+import MoonSchematic, { type OrbitGeometry } from "./MoonSchematic";
 import SplitWorkspace from "./SplitWorkspace";
 
 type Props = {
@@ -30,6 +31,9 @@ export default function MissionAnalysis({ latitude, longitude, arrivalUtc, durat
   const [error, setError] = useState("");
   const [terrainError, setTerrainError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [viewerMode, setViewerMode] = useState<"3d" | "2d">("3d");
+  const [orbit, setOrbit] = useState<OrbitGeometry | null>(null);
+  const [orbitError, setOrbitError] = useState("");
   const arrival = useMemo(() => new Date(arrivalUtc), [arrivalUtc]);
   const duration = Math.max(1, durationHours);
   const viewTime = new Date(arrival.getTime() + elapsed * 3600_000);
@@ -50,6 +54,7 @@ export default function MissionAnalysis({ latitude, longitude, arrivalUtc, durat
     const controller = new AbortController();
     setTerrain(null);
     setTerrainError("");
+    if (viewerMode === "2d") return;
     const query = new URLSearchParams({ latitude: String(latitude), longitude: String(longitude) });
     fetch(`/api/terrain/local-patch?${query}`, { signal: controller.signal })
       .then(async response => {
@@ -62,7 +67,7 @@ export default function MissionAnalysis({ latitude, longitude, arrivalUtc, durat
       .then(setTerrain)
       .catch(reason => { if (!controller.signal.aborted) setTerrainError(String(reason.message || reason)); });
     return () => controller.abort();
-  }, [latitude, longitude]);
+  }, [latitude, longitude, viewerMode]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -88,17 +93,49 @@ export default function MissionAnalysis({ latitude, longitude, arrivalUtc, durat
     return () => controller.abort();
   }, [latitude, longitude, viewTime.getTime()]);
 
+  useEffect(() => {
+    if (viewerMode !== "2d" || !Number.isFinite(viewTime.getTime())) return;
+    const controller = new AbortController();
+    const params = new URLSearchParams({
+      latitude: String(latitude), longitude: String(longitude), time: viewTime.toISOString(),
+    });
+    setOrbitError("");
+    fetch(`/api/ephemeris/orbit?${params}`, { signal: controller.signal })
+      .then(async response => {
+        if (!response.ok) {
+          const data = await response.json().catch(() => ({}));
+          throw new Error(data.detail || "Orbit view unavailable");
+        }
+        return response.json() as Promise<OrbitGeometry>;
+      })
+      .then(data => { if (!controller.signal.aborted) setOrbit(data); })
+      .catch(reason => {
+        if (!controller.signal.aborted) { setOrbitError(String(reason.message || reason)); setOrbit(null); }
+      })
+    return () => controller.abort();
+  }, [viewerMode, latitude, longitude, viewTime.getTime()]);
+
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#191919] text-[#ddd]">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#444] px-3 py-2 text-xs">
         <span className="min-w-0 text-white">MISSION ANALYSIS <span className="ml-2 text-[#999]">{siteName}</span></span>
-        <span className="text-[10px] text-[#999]">{terrain?.resolution ? `LOLA ${terrain.resolution}` : "Local DEM"}{terrain ? ` · ${Math.round(terrain.coverage_fraction * 100)}% coverage` : ""}</span>
+        <div className="flex flex-wrap items-center gap-2">
+          <div role="group" aria-label="Mission viewer" className="flex border border-[#555]">
+            {(["3d", "2d"] as const).map(mode => <button key={mode} type="button" aria-pressed={viewerMode === mode}
+              onClick={() => setViewerMode(mode)}
+              className={`min-h-8 px-3 text-[11px] ${viewerMode === mode ? "bg-[#03ace4] text-white" : "bg-[#30363d] text-[#bbb] hover:bg-[#46505a]"}`}>{mode === "3d" ? "3D terrain" : "2D view"}</button>)}
+          </div>
+          {viewerMode === "3d" && <span className="text-[10px] text-[#999]">{terrain?.resolution ? `LOLA ${terrain.resolution}` : "Local DEM"}{terrain ? ` · ${Math.round(terrain.coverage_fraction * 100)}% coverage` : ""}</span>}
+        </div>
       </div>
       <SplitWorkspace active splitId="analysis" primary={map} secondary={
         <div className="relative h-full min-h-0">
-          <TerrainScene patch={terrain} ephemeris={result} siteLabel={siteName} />
-          {terrainError && <p className="absolute left-3 right-3 top-3 bg-[#292929] p-2 text-xs text-[#ef9292]">{terrainError}. No terrain surface displayed.</p>}
-          {!terrain && !terrainError && <p className="pointer-events-none absolute left-3 top-3 bg-[#292929]/80 p-2 text-xs">Loading local DEM...</p>}
+          {viewerMode === "3d" ? <>
+            <TerrainScene patch={terrain} ephemeris={result} siteLabel={siteName} />
+            {terrainError && <p className="absolute left-3 right-3 top-3 bg-[#292929] p-2 text-xs text-[#ef9292]">{terrainError}. No terrain surface displayed.</p>}
+            {!terrain && !terrainError && <p className="pointer-events-none absolute left-3 top-3 bg-[#292929]/80 p-2 text-xs">Loading local DEM...</p>}
+          </> : <MoonSchematic orbit={orbit} ephemeris={result} siteLabel={siteName}
+            error={orbitError} />}
         </div>
       } />
       <div className="orbis-scroll max-h-[45%] shrink-0 space-y-2 overflow-y-auto overscroll-contain border-t border-[#444] bg-[#252525] p-2.5 text-xs leading-relaxed sm:max-h-[40%] sm:p-3">
@@ -133,7 +170,7 @@ export default function MissionAnalysis({ latitude, longitude, arrivalUtc, durat
         </div>
         {error && <div role="alert" className="break-words text-[#ef9292]">{error}</div>}
         <details className="text-[10px] leading-relaxed text-[#aaa]"><summary className="cursor-pointer">Model details</summary>
-          Sun/Earth visibility uses sampled terrain horizons{result?.near_5m_used ? ", with 5 m DEM near the site" : ""} and the 80 m DEM farther out. {result?.terrain_coverage_min_km !== undefined ? `Far terrain is covered to at least ${result.terrain_coverage_min_km} km in every sampled direction. ` : ""}The 3D patch has 2x vertical relief; lighting and nearby shadows are illustrative. Power systems and ground stations are not modeled.
+          Sun/Earth visibility uses sampled terrain horizons{result?.near_5m_used ? ", with 5 m DEM near the site" : ""} and the 80 m DEM farther out. {result?.terrain_coverage_min_km !== undefined ? `Far terrain is covered to at least ${result.terrain_coverage_min_km} km in every sampled direction. ` : ""}{viewerMode === "3d" ? "The 3D patch has 2x vertical relief; lighting and nearby shadows are illustrative. " : "The 2D view shows Earth-centered geometric positions in the ecliptic plane; orbit motion and lunar orientation use SPICE. Body sizes, displayed distances, and the site's rim position are schematic. "}Power systems and ground stations are not modeled.
         </details>
       </div>
     </div>

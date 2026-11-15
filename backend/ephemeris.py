@@ -213,3 +213,37 @@ def get_ephemeris(
         "model": ("5 m DEM within 2 km where covered; " if profile["near_5m_used"] else "") +
                  "80 m DEM sampled to 100 km where covered",
     }
+
+
+@router.get("/orbit")
+def get_orbit(
+    latitude: float = Query(..., ge=-90, le=90),
+    longitude: float = Query(..., ge=-180, le=180),
+    time: datetime = Query(...),
+):
+    if time.tzinfo is None or time.utcoffset() is None:
+        raise HTTPException(422, "Time must contain a UTC offset or Z")
+    utc = time.astimezone(timezone.utc)
+    lat = math.radians(latitude)
+    lon = math.radians(longitude)
+    site = (math.cos(lat) * math.cos(lon), math.cos(lat) * math.sin(lon), math.sin(lat))
+    with _lock:
+        load_kernels()
+        try:
+            et = spice.utc2et(utc.strftime("%Y-%m-%dT%H:%M:%S.%f"))
+            moon, _ = spice.spkpos("MOON", et, "ECLIPJ2000", "NONE", "EARTH")
+            sun, _ = spice.spkpos("SUN", et, "ECLIPJ2000", "NONE", "EARTH")
+            orientation = spice.pxform("MOON_ME", "ECLIPJ2000", et)
+            site_axis = spice.mxv(orientation, site)
+            earth_facing_axis = spice.mxv(orientation, (1.0, 0.0, 0.0))
+        except SpiceyError as exc:
+            raise HTTPException(422, f"Orbit view unavailable for this date: {exc.short}") from exc
+    return {
+        "time_utc": utc.isoformat().replace("+00:00", "Z"),
+        "moon_xy_km": [float(moon[0]), float(moon[1])],
+        "sun_xy_km": [float(sun[0]), float(sun[1])],
+        "moon_distance_km": round(float(spice.vnorm(moon))),
+        "site_axis_xy": [float(site_axis[0]), float(site_axis[1])],
+        "earth_facing_axis_xy": [float(earth_facing_axis[0]), float(earth_facing_axis[1])],
+        "projection": "Earth-centered ECLIPJ2000 plane; geometric positions",
+    }
