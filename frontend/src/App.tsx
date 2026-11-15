@@ -601,10 +601,12 @@ function App() {
         setSelected({ projectId: project.id });
         setExpanded((old) => [...new Set([...old, project.id])]);
       } else if (dialog.action === "site" && dialog.target) {
+        const project = projects.find(item => item.id === dialog.target!.projectId);
+        if (!project) throw new Error("Project is no longer available.");
         const site = await request<Site>(
           `${urlFor(dialog.target)}/sites`,
           "POST",
-          { name: name.trim() },
+          { name: name.trim(), latitude: project.center_latitude, longitude: project.center_longitude },
         );
         unlockNewSite(site.id);
         setSelected({ projectId: dialog.target.projectId, siteId: site.id });
