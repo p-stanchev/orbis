@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent, type WheelEvent } from "react";
-import { Layers, LocateFixed, MapPin, Minus, Plus, X } from "lucide-react";
+import { Check, Layers, LocateFixed, MapPin, Minus, Moon, Plus, X } from "lucide-react";
 import type { SearchRegion, SearchGridCell } from "./VisibilityStatistics";
 import LandmarkCard, { type Landmark } from "./LandmarkCard";
 
@@ -49,6 +49,9 @@ export default function LunarMap({ landmarksEnabled, projects, hiddenProjectIds,
   const map = useRef<HTMLDivElement>(null);
   const pointers = useRef(new Map<number, Pointer>());
   const gesture = useRef<Gesture | null>(null);
+  const landmarkHoverTimer = useRef<number | null>(null);
+  const hoverSampleAt = useRef(0);
+  const hoverRequestId = useRef(0);
 
   const [info, setInfo] = useState<Info | null>(null);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
@@ -64,8 +67,12 @@ export default function LunarMap({ landmarksEnabled, projects, hiddenProjectIds,
   const [landmarks, setLandmarks] = useState<Landmark[]>([]);
   const [landmarkMarkers, setLandmarkMarkers] = useState<Marker[]>([]);
   const [activeLandmarkId, setActiveLandmarkId] = useState<string | null>(null);
+  const [hoveredLandmarkId, setHoveredLandmarkId] = useState<string | null>(null);
   const [landmarkCardOpen, setLandmarkCardOpen] = useState(false);
+  const [landmarkPinned, setLandmarkPinned] = useState(false);
   const [landmarkError, setLandmarkError] = useState("");
+  const [layerPanelOpen, setLayerPanelOpen] = useState(false);
+  const [hoverCoordinates, setHoverCoordinates] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [smoothFocus, setSmoothFocus] = useState(false);
@@ -79,18 +86,26 @@ export default function LunarMap({ landmarksEnabled, projects, hiddenProjectIds,
     }
   });
   const selectedLocked = !!selected?.siteId && !unlockedSiteIds.includes(selected.siteId);
-  const side = Math.min(dimensions.width, dimensions.height);
+  const side = Math.min(dimensions.width, dimensions.height) * 0.9;
   const regionPositions = new Map(regionMarkers.map(marker => [marker.id, marker]));
+  const candidateAreasVisible = !!regions?.grid.length && (regions.projectId === null || !hiddenProjectIds.includes(regions.projectId));
   const landmarkPositions = new Map(landmarkMarkers.map(marker => [marker.id, marker]));
   const activeLandmarkIndex = landmarks.findIndex(landmark => landmark.id === activeLandmarkId);
   const activeLandmark = activeLandmarkIndex >= 0 ? landmarks[activeLandmarkIndex] : null;
 
   useEffect(() => {
     if (!landmarksEnabled) {
+      if (landmarkHoverTimer.current !== null) window.clearTimeout(landmarkHoverTimer.current);
       setLandmarkCardOpen(false);
       setActiveLandmarkId(null);
+      setHoveredLandmarkId(null);
+      setLandmarkPinned(false);
     }
   }, [landmarksEnabled]);
+
+  useEffect(() => () => {
+    if (landmarkHoverTimer.current !== null) window.clearTimeout(landmarkHoverTimer.current);
+  }, []);
 
   const siteList = projects.flatMap(project => [
     { id: `center:${project.id}`, latitude: project.center_latitude, longitude: project.center_longitude },
@@ -284,6 +299,25 @@ export default function LunarMap({ landmarksEnabled, projects, hiddenProjectIds,
     return response.json() as Promise<{ latitude: number; longitude: number }>;
   }
 
+  function updateHoverCoordinates(event: PointerEvent<HTMLDivElement>) {
+    if (event.pointerType === "touch" || pointers.current.has(event.pointerId)) return;
+    const position = normalizedPoint(event.clientX, event.clientY);
+    if (!position) {
+      hoverRequestId.current++;
+      setHoverCoordinates(null);
+      return;
+    }
+    const now = performance.now();
+    if (now - hoverSampleAt.current < 150) return;
+    hoverSampleAt.current = now;
+    const requestId = ++hoverRequestId.current;
+    void coordinateAt(position.x, position.y).then(({ latitude, longitude }) => {
+      if (requestId === hoverRequestId.current) {
+        setHoverCoordinates(`${Math.abs(latitude).toFixed(4)}°${latitude < 0 ? "S" : "N"} · ${Math.abs(longitude).toFixed(4)}°${longitude < 0 ? "W" : "E"}`);
+      }
+    }).catch(() => { if (requestId === hoverRequestId.current) setHoverCoordinates(null); });
+  }
+
   async function place(target: Target | null, position: ReturnType<typeof normalizedPoint>) {
     if (!position || (target?.siteId && !unlockedSiteIds.includes(target.siteId))) return;
     setSaving(true);
@@ -303,6 +337,9 @@ export default function LunarMap({ landmarksEnabled, projects, hiddenProjectIds,
 
   function handlePointerDown(event: PointerEvent<HTMLDivElement>) {
     if (event.pointerType === "mouse" && event.button !== 0) return;
+    hoverRequestId.current++;
+    setHoverCoordinates(null);
+    setLayerPanelOpen(false);
     setSmoothFocus(false);
     event.currentTarget.setPointerCapture(event.pointerId);
     const pointer = { x: event.clientX, y: event.clientY };
@@ -335,6 +372,7 @@ export default function LunarMap({ landmarksEnabled, projects, hiddenProjectIds,
   }
 
   function handlePointerMove(event: PointerEvent<HTMLDivElement>) {
+    updateHoverCoordinates(event);
     const previous = pointers.current.get(event.pointerId);
     if (!previous || !gesture.current) return;
     const now = { x: event.clientX, y: event.clientY };
@@ -442,18 +480,40 @@ export default function LunarMap({ landmarksEnabled, projects, hiddenProjectIds,
   function tourLandmark(delta: number) {
     if (activeLandmarkIndex < 0 || !landmarks.length) return;
     const next = landmarks[(activeLandmarkIndex + delta + landmarks.length) % landmarks.length];
+    clearLandmarkHoverTimer();
+    setLandmarkPinned(true);
     setActiveLandmarkId(next.id);
     setLandmarkCardOpen(true);
     focusLandmark(next.id);
   }
 
+  function clearLandmarkHoverTimer() {
+    if (landmarkHoverTimer.current !== null) window.clearTimeout(landmarkHoverTimer.current);
+    landmarkHoverTimer.current = null;
+  }
+
+  function previewLandmark(id: string) {
+    if (landmarkPinned) return;
+    clearLandmarkHoverTimer();
+    setActiveLandmarkId(id);
+    setLandmarkCardOpen(true);
+  }
+
+  function scheduleLandmarkHoverClose() {
+    if (landmarkPinned) return;
+    clearLandmarkHoverTimer();
+    landmarkHoverTimer.current = window.setTimeout(() => closeLandmarkCard(), 450);
+  }
+
   function closeLandmarkCard() {
+    clearLandmarkHoverTimer();
     if (document.activeElement?.closest(".orbis-landmark-card")) {
       const marker = [...(map.current?.querySelectorAll<HTMLButtonElement>("[data-landmark-id]") ?? [])]
         .find(button => button.dataset.landmarkId === activeLandmarkId);
       const toggle = viewport.current?.parentElement?.querySelector<HTMLButtonElement>('[aria-label="Toggle lunar landmarks"]');
       (marker ?? toggle)?.focus({ preventScroll: true });
     }
+    setLandmarkPinned(false);
     setLandmarkCardOpen(false);
   }
 
@@ -463,6 +523,8 @@ export default function LunarMap({ landmarksEnabled, projects, hiddenProjectIds,
     rx: info.radius / (info.bounds.right - info.bounds.left) * 100,
     ry: info.radius / (info.bounds.top - info.bounds.bottom) * 100,
   } : null;
+  const latitudeRingRatio = (degreesFromPole: number) =>
+    Math.tan(degreesFromPole * Math.PI / 360) / Math.tan(10 * Math.PI / 360);
 
   return (
     <div className="@container relative h-full w-full overflow-hidden bg-[#191919] text-[#ddd]">
@@ -473,6 +535,7 @@ export default function LunarMap({ landmarksEnabled, projects, hiddenProjectIds,
         onWheel={handleWheel}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
+        onPointerLeave={() => { hoverRequestId.current++; setHoverCoordinates(null); }}
         onPointerUp={handlePointerUp}
         onPointerCancel={event => {
           pointers.current.delete(event.pointerId);
@@ -505,11 +568,17 @@ export default function LunarMap({ landmarksEnabled, projects, hiddenProjectIds,
               <svg viewBox="0 0 100 100" className="pointer-events-none absolute inset-0 h-full w-full overflow-visible">
                 <ellipse cx={ring.cx} cy={ring.cy} rx={ring.rx} ry={ring.ry}
                   fill="none" stroke="white" strokeOpacity="0.35" strokeWidth="0.12" />
-                <ellipse cx={ring.cx} cy={ring.cy} rx={ring.rx / 2} ry={ring.ry / 2}
-                  fill="none" stroke="white" strokeOpacity="0.28" strokeDasharray="0.65 0.65" strokeWidth="0.1" />
-                <path d={`M${ring.cx - ring.rx} ${ring.cy} H${ring.cx + ring.rx} M${ring.cx} ${ring.cy - ring.ry} V${ring.cy + ring.ry}`}
-                  stroke="white" strokeOpacity="0.2" strokeWidth="0.1" />
-                <circle cx={ring.cx} cy={ring.cy} r="0.32" fill="white" />
+                {([85, 87] as const).map(latitude => {
+                  const ratio = latitudeRingRatio(90 - latitude);
+                  return <g key={latitude}>
+                    <ellipse cx={ring.cx} cy={ring.cy} rx={ring.rx * ratio} ry={ring.ry * ratio}
+                      fill="none" stroke="white" strokeOpacity="0.28" strokeDasharray="0.65 0.65" strokeWidth="0.1" />
+                    <text x={ring.cx + ring.rx * ratio - 0.8} y={ring.cy - 0.9}
+                      fill="white" fillOpacity="0.65" fontSize="1.4" textAnchor="end">{latitude}°S</text>
+                  </g>;
+                })}
+                <circle cx={ring.cx} cy={ring.cy} r="0.42" fill="white" />
+                <text x={ring.cx + 1.2} y={ring.cy - 1.2} fill="white" fillOpacity="0.8" fontSize="1.5">90°S</text>
               </svg>
             )}
             {exploreArea && exploreMarker && info && <div className="pointer-events-none absolute z-[6] rounded-full border-2 border-dashed border-white/90 bg-white/[0.08] shadow-[0_0_0_1px_#111,0_0_18px_#fff5]"
@@ -578,22 +647,25 @@ export default function LunarMap({ landmarksEnabled, projects, hiddenProjectIds,
               const position = landmarkPositions.get(landmark.id);
               if (!position) return null;
               const active = activeLandmarkId === landmark.id;
+              const highlighted = hoveredLandmarkId === landmark.id || active && landmarkCardOpen;
               return <div key={landmark.id}>
                 {info && landmark.diameter_km && <div aria-hidden="true"
-                  className={`pointer-events-none absolute z-[7] rounded-full border bg-[#e78bb6]/[0.08] ${active ? "border-2 border-[#ffd1e2]" : "border-[#e78bb6]/80"}`}
+                  className={`pointer-events-none absolute z-[7] rounded-full border transition-[background-color,border-color,border-width] duration-300 ease-in-out ${highlighted ? "border-2 border-[#ffd1e2] bg-[#e78bb6]/[0.24]" : "border-[#e78bb6]/85 bg-[#e78bb6]/[0.15]"}`}
                   style={{ left: `${position.u * 100}%`, top: `${position.v * 100}%`,
                     width: `${landmark.diameter_km * 1000 / (info.bounds.right - info.bounds.left) * 100}%`,
                     height: `${landmark.diameter_km * 1000 / (info.bounds.top - info.bounds.bottom) * 100}%`,
                     transform: "translate(-50%, -50%)" }} />}
                 <button type="button" data-landmark-id={landmark.id} aria-label={`Open ${landmark.name} landmark`}
-                  aria-pressed={active} title={landmark.name}
+                  aria-pressed={active && landmarkCardOpen} title={landmark.name}
                   onPointerDown={event => event.stopPropagation()}
                   onPointerUp={event => event.stopPropagation()}
-                  onClick={event => { event.stopPropagation(); setActiveLandmarkId(landmark.id); setLandmarkCardOpen(true); focusLandmark(landmark.id); }}
+                  onPointerEnter={event => { if (event.pointerType !== "touch") { setHoveredLandmarkId(landmark.id); previewLandmark(landmark.id); } }}
+                  onPointerLeave={() => { setHoveredLandmarkId(null); scheduleLandmarkHoverClose(); }}
+                  onClick={event => { event.stopPropagation(); clearLandmarkHoverTimer(); setLandmarkPinned(true); setActiveLandmarkId(landmark.id); setLandmarkCardOpen(true); focusLandmark(landmark.id); }}
                   className="absolute z-[8] flex h-7 w-7 items-center justify-center"
                   style={{ left: `${position.u * 100}%`, top: `${position.v * 100}%`,
                     transform: `translate(-50%, -50%) scale(${1 / zoom})` }}>
-                  <span className={`pointer-events-none h-2.5 w-2.5 rounded-full border-2 border-[#e78bb6] bg-[#301b29] ${active ? "outline outline-2 outline-offset-2 outline-white" : ""}`} />
+                  <span className={`pointer-events-none h-2.5 w-2.5 rounded-full border-2 border-[#e78bb6] bg-[#301b29] ${active && landmarkCardOpen ? "outline outline-2 outline-offset-2 outline-white" : ""}`} />
                 </button>
               </div>;
             })}
@@ -635,20 +707,37 @@ export default function LunarMap({ landmarksEnabled, projects, hiddenProjectIds,
       <div className="pointer-events-none absolute left-3 top-3 z-20 hidden bg-[#242424]/95 px-3 py-2 text-[11px] @min-[640px]:block">
         LUNAR SOUTH POLE <span className="ml-1 text-[#aaa]">80°S–90°S</span>
       </div>
-      <div className="absolute right-2 top-2 z-20 flex max-w-[calc(100%-16px)] flex-col items-start gap-1 sm:right-3 sm:top-3 sm:max-w-[calc(100%-24px)]">
-        <div className="flex max-w-full items-center gap-0.5 bg-[#242424]/95 p-1 sm:gap-1">
-          <button className={`flex h-8 shrink-0 items-center gap-1 px-2 text-xs ${shadows ? "bg-[#444] text-accent" : "text-[#aaa]"}`}
-            type="button" aria-label="Toggle permanent shadows" aria-pressed={shadows}
-            onClick={() => setShadows(!shadows)}><Layers size={15} /> PSR</button>
-          {landmarksEnabled && <button className={`flex h-8 shrink-0 items-center gap-1 px-2 text-xs ${landmarksVisible ? "bg-[#444] text-[#f0a5c7]" : "text-[#aaa]"}`}
-            type="button" aria-label="Toggle lunar landmarks" aria-pressed={landmarksVisible}
-            onClick={() => { setLandmarksVisible(current => !current); setActiveLandmarkId(null); setLandmarkCardOpen(false); }}><MapPin size={15} /> Landmarks</button>}
-          <button type="button" title="Zoom in" aria-label="Zoom in" className="shrink-0 p-2 hover:bg-[#444]" onClick={() => changeZoom(1.5)}><Plus size={15} /></button>
-          <button type="button" title="Zoom out" aria-label="Zoom out" className="shrink-0 p-2 hover:bg-[#444]" onClick={() => changeZoom(1 / 1.5)}><Minus size={15} /></button>
-          <button type="button" title="Reset view" aria-label="Reset view" className="shrink-0 p-2 hover:bg-[#444]" onClick={reset}><LocateFixed size={15} /></button>
+      <div className="absolute right-2 top-2 z-20 flex max-w-[calc(100%-16px)] flex-col items-end gap-1.5 sm:right-3 sm:top-3 sm:max-w-[calc(100%-24px)]">
+        <div className="flex items-center gap-1.5">
+          <button type="button" aria-label="Map layers" aria-expanded={layerPanelOpen} aria-controls="orbis-map-layers"
+            onClick={() => setLayerPanelOpen(current => !current)}
+            className={`flex h-9 items-center gap-1.5 bg-[#242424]/95 px-2.5 text-xs hover:bg-[#383838] ${layerPanelOpen ? "text-white" : "text-[#d1d5d7]"}`}>
+            <Layers size={16} /> Layers
+          </button>
+          <div role="group" aria-label="Map navigation" className="flex h-9 items-center bg-[#242424]/95 px-0.5">
+            <button type="button" title="Zoom in" aria-label="Zoom in" className="flex h-8 w-8 items-center justify-center hover:bg-[#444]" onClick={() => changeZoom(1.5)}><Plus size={16} /></button>
+            <button type="button" title="Zoom out" aria-label="Zoom out" className="flex h-8 w-8 items-center justify-center hover:bg-[#444]" onClick={() => changeZoom(1 / 1.5)}><Minus size={16} /></button>
+            <button type="button" title="Reset view" aria-label="Reset view" className="flex h-8 w-8 items-center justify-center hover:bg-[#444]" onClick={reset}><LocateFixed size={16} /></button>
+          </div>
         </div>
-        {shadows && <div className="orbis-overlay-enter self-end bg-[#242424]/95 px-2 py-1 text-[10px] sm:text-[11px]">
-          <span className="mr-2 inline-block h-2 w-2 bg-accent" />Permanently shadowed regions
+        {layerPanelOpen && <div id="orbis-map-layers" className="orbis-overlay-enter w-[min(260px,calc(100vw-24px))] border border-[#4b555a] bg-[#292d30]/98 p-2.5 text-xs shadow-[0_8px_24px_#0008]">
+          <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.12em] text-[#b8c5cb]">Map layers</div>
+          <button type="button" aria-label="Toggle permanent shadows" aria-pressed={shadows}
+            onClick={() => setShadows(current => !current)} className="flex min-h-9 w-full items-center gap-2 px-1.5 text-left text-[#e0e4e6] hover:bg-[#3a4145]">
+            <Moon size={15} className="text-[#a9b2b7]" /><span className="min-w-0 flex-1">Permanently shadowed</span>
+            <span className={`flex h-4 w-4 items-center justify-center rounded-full border ${shadows ? "border-accent text-accent" : "border-[#778187]"}`}>{shadows && <Check size={11} />}</span>
+          </button>
+          {landmarksEnabled && <button type="button" aria-label="Toggle lunar landmarks" aria-pressed={landmarksVisible}
+            onClick={() => { clearLandmarkHoverTimer(); setLandmarksVisible(current => !current); setActiveLandmarkId(null); setHoveredLandmarkId(null); setLandmarkCardOpen(false); setLandmarkPinned(false); }}
+            className="flex min-h-9 w-full items-center gap-2 px-1.5 text-left text-[#e0e4e6] hover:bg-[#3a4145]">
+            <MapPin size={15} className="text-[#e78bb6]" /><span className="min-w-0 flex-1">Landmarks</span>
+            <span className={`flex h-4 w-4 items-center justify-center rounded-full border ${landmarksVisible ? "border-[#e78bb6] text-[#e78bb6]" : "border-[#778187]"}`}>{landmarksVisible && <Check size={11} />}</span>
+          </button>}
+        </div>}
+        {(shadows || landmarksEnabled && landmarksVisible || candidateAreasVisible) && <div className="pointer-events-none flex flex-wrap justify-end gap-x-3 gap-y-1 bg-[#242424]/95 px-2 py-1.5 text-[10px] text-[#c5ced2]">
+          {shadows && <span className="flex items-center gap-1.5"><span className="h-2 w-2 bg-accent" />PSR</span>}
+          {landmarksEnabled && landmarksVisible && <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full border border-[#e78bb6]" />Landmarks</span>}
+          {candidateAreasVisible && <span className="flex items-center gap-1.5"><span className="flex gap-0.5"><span className="inline-block h-2 w-2 bg-success" /><span className="inline-block h-2 w-2 bg-warning" /><span className="inline-block h-2 w-2 bg-danger" /></span>Candidates</span>}
         </div>}
         {landmarksEnabled && landmarksVisible && landmarkError && <div role="alert" className="bg-[#292929] px-2 py-1 text-xs text-[#ef9292]">{landmarkError}</div>}
       </div>
@@ -656,7 +745,7 @@ export default function LunarMap({ landmarksEnabled, projects, hiddenProjectIds,
         open={landmarkCardOpen}
         index={activeLandmarkIndex} total={landmarks.length}
         onPrevious={() => tourLandmark(-1)} onNext={() => tourLandmark(1)}
-        onClose={closeLandmarkCard} />}
+        onClose={closeLandmarkCard} onHoverEnter={clearLandmarkHoverTimer} onHoverLeave={scheduleLandmarkHoverClose} />}
       {!hintDismissed && <div className="pointer-events-none absolute bottom-2 left-2 right-2 z-20 flex max-w-full items-center gap-2 bg-[#242424]/95 p-2 font-mono text-[10px] sm:bottom-3 sm:left-3 sm:right-auto sm:text-[11px]">
         <div className="min-w-0 flex-1 truncate">
           {probeMode ? <span>Tap terrain to inspect a point</span> : exploreArea ? <span>Tap terrain or drag the white circle to move the search area</span> : point ? <><div>LAT {point.latitude.toFixed(5)}°</div><div>LON {point.longitude.toFixed(5)}°</div></> :
@@ -665,9 +754,11 @@ export default function LunarMap({ landmarksEnabled, projects, hiddenProjectIds,
         <button type="button" onClick={dismissHint} aria-label="Dismiss map hint permanently" title="Hide map hint in this browser"
           className="pointer-events-auto shrink-0 p-1 text-[#aaa] hover:text-white"><X size={14} /></button>
       </div>}
-      <div className="pointer-events-none absolute bottom-3 right-3 z-20 hidden bg-[#242424]/95 px-2 py-1 text-[10px] text-[#aaa] sm:block">
+      {hoverCoordinates ? <div className="pointer-events-none absolute bottom-12 right-2 z-20 bg-[#242424]/95 px-2 py-1 font-mono text-[10px] text-[#e3eaed] sm:bottom-3 sm:right-3">
+        {hoverCoordinates}
+      </div> : <div className="pointer-events-none absolute bottom-3 right-3 z-20 hidden bg-[#242424]/95 px-2 py-1 text-[10px] text-[#aaa] sm:block">
         {probeMode ? exploreArea ? "Click terrain to set search center" : "Click terrain to inspect a point" : saving ? "Saving..." : `${Math.round(zoom * 100)}% · LOLA`}
-      </div>
+      </div>}
       {error && info && <div className="pointer-events-none absolute bottom-14 left-3 z-20 bg-[#292929] px-3 py-2 text-xs text-[#ef9292]">{error}</div>}
     </div>
   );

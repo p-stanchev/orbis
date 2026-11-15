@@ -29,9 +29,11 @@ type Props = {
   onPrevious: () => void;
   onNext: () => void;
   onClose: () => void;
+  onHoverEnter: () => void;
+  onHoverLeave: () => void;
 };
 
-export default function LandmarkCard({ landmark, open, index, total, onPrevious, onNext, onClose }: Props) {
+export default function LandmarkCard({ landmark, open, index, total, onPrevious, onNext, onClose, onHoverEnter, onHoverLeave }: Props) {
   const content = useRef<HTMLDivElement>(null);
   const [failedImagePath, setFailedImagePath] = useState<string | null>(null);
   const imagePath = landmark.image.url || `/landmarks/${landmark.image.suggested_filename}`;
@@ -47,7 +49,8 @@ export default function LandmarkCard({ landmark, open, index, total, onPrevious,
   }, [onClose, open]);
 
   return <section aria-label={`${landmark.name} landmark information`} aria-hidden={!open} inert={!open}
-    className={`orbis-landmark-card absolute inset-x-2 bottom-2 z-30 flex max-h-[65%] flex-col overflow-hidden border border-[#586269] bg-[#292d30] shadow-[0_8px_26px_#0009] sm:bottom-12 sm:left-3 sm:right-auto sm:max-h-[calc(100%-96px)] sm:w-[min(360px,calc(100%-24px))] ${open ? "orbis-landmark-card-open" : ""}`}>
+    onPointerEnter={onHoverEnter} onPointerLeave={onHoverLeave}
+    className={`orbis-landmark-card absolute inset-x-2 bottom-2 z-30 flex max-h-[65%] flex-col overflow-hidden border border-[#586269] bg-[#292d30] shadow-[0_8px_26px_#0009] sm:bottom-12 sm:left-3 sm:right-auto sm:max-h-[calc(100%-96px)] sm:w-[min(360px,calc(100%-24px))] ${open ? "orbis-landmark-card-open" : "orbis-landmark-card-closed"}`}>
     <div className="flex shrink-0 items-start justify-between gap-3 border-b border-[#495158] px-3 py-2">
       <div className="min-w-0">
         <div className="text-[10px] uppercase tracking-wide text-[#f0a5c7]">Lunar landmark · {index + 1} / {total}</div>

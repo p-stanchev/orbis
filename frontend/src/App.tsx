@@ -655,7 +655,8 @@ function App() {
           return (
             <div key={project.id} className={isHidden ? "text-[#888]" : ""}>
               <div
-                className={`flex h-9 items-center hover:bg-[#484848] ${selected?.projectId === project.id && !selected.siteId ? "bg-[#505050]" : ""}`}
+                className={`flex h-10 items-center border-l-[3px] transition-colors hover:bg-[#41474a] ${selected?.projectId === project.id ? "bg-[#3b4448]" : ""}`}
+                style={{ borderLeftColor: project.color }}
               >
                 <IconButton
                   title={expandedNow ? "Collapse" : "Expand"}
@@ -684,6 +685,7 @@ function App() {
                 >
                   <Folder size={14} className="shrink-0" style={{ color: project.color }} />
                   <span className="truncate">{project.name}</span>
+                  <span className="shrink-0 rounded bg-[#252b2e] px-1.5 py-0.5 font-mono text-[10px] text-[#b9c5ca]" title={`${project.sites.length} landing sites`}>{project.sites.length}</span>
                 </button>
                 <button
                   type="button"
@@ -731,7 +733,7 @@ function App() {
                   .map((site) => (
                     <div
                       key={site.id}
-                      className={`flex h-8 items-center pl-7 hover:bg-[#484848] ${selected?.siteId === site.id ? "bg-[#505050]" : ""}`}
+                       className={`flex h-9 items-center border-l-[3px] border-transparent pl-6 transition-colors hover:bg-[#41474a] ${selected?.siteId === site.id ? "bg-[#50585c]" : ""}`}
                     >
                       <button
                         className="flex min-w-0 flex-1 items-center gap-2 text-left text-xs"
@@ -839,11 +841,11 @@ function App() {
           project={currentProject}
           save={(changes) => saveMissionSettings(currentProject.id, changes)}
         />
-      ) : <div className="p-4 text-xs leading-relaxed text-[#aeb5ba]">
-        <p className="font-medium text-[#e4e8ea]">Nothing selected</p>
-        <p className="mt-2">Choose a project or landing site from Browse to see its settings.</p>
+      ) : <div className="flex min-h-0 flex-1 flex-col items-center px-5 pt-12 text-center text-xs leading-relaxed text-[#b9c3c8] sm:pt-16">
+        <p className="font-medium text-[#edf1f2]">Nothing selected</p>
+        <p className="mt-2 max-w-52">Select a project or landing site in Browse to inspect its coordinates and mission settings.</p>
         <button type="button" onClick={() => { setWorkspace("explore"); setProbePoint(null); setDrawer(null); }}
-          className="mt-4 text-accent hover:underline">Explore candidate areas ↗</button>
+          className="mt-5 min-h-9 border border-[#57899b] px-3 font-medium text-[#8dd3eb] hover:bg-[#34454b] hover:text-white">Explore candidate areas</button>
       </div>}
     </>
   );
@@ -883,27 +885,26 @@ function App() {
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-[#3d3d3d] text-[#eee]">
-      <header className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-[#505050] bg-[#242424] px-2">
-        <div className="flex min-w-0 items-center gap-2">
+      <header className="flex h-14 shrink-0 items-center gap-2 border-b border-[#505050] bg-[#242424] px-2 sm:gap-3 sm:px-3">
+        <div className="flex shrink-0 items-center gap-2 sm:gap-3">
           <button
-            className="lg:hidden"
+            className="flex h-9 w-8 items-center justify-center text-[#c8d0d4] hover:text-white lg:hidden"
             title="Browse"
             aria-label="Open Browse"
             onClick={() => setDrawer("browse")}
           >
             <Menu size={20} />
           </button>
-          <button
-            className="flex h-9 items-center gap-1 bg-accent px-2 text-xs font-medium text-white transition-colors hover:bg-[#079bc9]"
-            onClick={() => openDialog("project")}
-          >
-            <Plus size={14} /> CREATE
-          </button>
-          <div className="flex h-9 min-w-0 items-center border border-[#444] bg-[#353535] px-2 focus-within:border-accent">
-            <Search size={14} className="shrink-0 text-[#888]" />
+          <div className="flex items-center gap-2 border-r border-[#505050] pr-2.5 sm:pr-4" aria-label="ORBIS">
+            <img src="/logo.svg" alt="" className="h-7 w-7 shrink-0 object-contain sm:h-8 sm:w-8" />
+            <span className="text-sm font-semibold tracking-[0.08em] text-white sm:text-base">ORBIS</span>
+          </div>
+        </div>
+        <div className="flex h-9 min-w-0 flex-1 items-center border border-[#444] bg-[#303030] px-2 focus-within:border-accent">
+            <Search size={15} className="shrink-0 text-[#aaa]" />
             <input
-              className="w-20 min-w-0 bg-transparent px-2 text-xs outline-none sm:w-40"
-              placeholder="Search"
+              className="min-w-0 flex-1 bg-transparent px-2 text-xs outline-none"
+              placeholder="Search projects..."
               aria-label="Search projects and sites"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
@@ -913,9 +914,10 @@ function App() {
                 <X size={13} />
               </button>
             )}
-          </div>
         </div>
-        <div className="flex shrink-0 items-center gap-2 text-[11px] text-[#ccc] sm:gap-3">
+        <div className="ml-auto flex shrink-0 items-center gap-2 text-[11px] text-[#ccc] sm:gap-3">
+          <button type="button" className="flex h-9 w-9 items-center justify-center text-accent transition-colors hover:bg-[#353535] hover:text-white"
+            title="Create project" aria-label="Create project" onClick={() => openDialog("project")}><Plus size={20} /></button>
           <span
             className="flex items-center gap-1.5"
             title={connected ? "API connected" : "API disconnected"}
@@ -926,7 +928,7 @@ function App() {
             <span className="hidden sm:inline">API</span>
           </span>
           <span
-            className="flex items-center gap-1"
+            className="hidden items-center gap-1 sm:flex"
             title="Connected browser sessions"
           >
             <Users size={14} />
@@ -951,27 +953,27 @@ function App() {
           {browseOpen && resizeHandle("browse")}
         </aside>
         <main className="flex min-h-0 min-w-0 flex-col overflow-hidden bg-[#191919]" aria-label="Lunar mission workspace">
-          <div className="flex h-11 min-w-0 shrink-0 items-center border-b border-[#505050] bg-[#242424] text-xs">
+          <div className="flex h-12 min-w-0 shrink-0 items-center border-b border-[#505050] bg-[#242424] text-sm">
             {!browseOpen && <button type="button" className="hidden h-full w-10 shrink-0 items-center justify-center border-r border-[#444] text-[#aaa] hover:bg-[#333] hover:text-white lg:flex"
               aria-label="Open Browse" title="Open Browse" onClick={() => setBrowseOpen(true)}><PanelLeftOpen size={18} /></button>}
-            <div className="orbis-scroll flex h-full min-w-0 flex-1 items-center gap-1 overflow-x-auto px-2">
+            <div className="orbis-scroll flex h-full min-w-0 flex-1 items-center gap-2 overflow-x-auto px-2 sm:gap-3 sm:px-4">
             <button type="button" onClick={() => { setWorkspace("map"); setProbeMode(false); }}
-              className={`h-9 shrink-0 border-b-2 px-3 transition-colors ${workspace === "map" ? "border-accent bg-[#363636] text-white" : "border-transparent text-[#aaa] hover:bg-[#333] hover:text-white"}`}>
+              className={`h-full shrink-0 border-b-[3px] px-2 transition-colors sm:px-3 ${workspace === "map" ? "border-accent font-medium text-white" : "border-transparent text-[#c0c3c6] hover:bg-[#333] hover:text-white"}`}>
               Map
             </button>
             <button type="button" onClick={() => { setWorkspace("explore"); setProbePoint(null); setProbeMode(false); }}
-              className={`h-9 shrink-0 border-b-2 px-3 transition-colors ${workspace === "explore" ? "border-accent bg-[#363636] text-white" : "border-transparent text-[#aaa] hover:bg-[#333] hover:text-white"}`}>
+              className={`h-full shrink-0 border-b-[3px] px-2 transition-colors sm:px-3 ${workspace === "explore" ? "border-accent font-medium text-white" : "border-transparent text-[#c0c3c6] hover:bg-[#333] hover:text-white"}`}>
               Explore
             </button>
             <button type="button" onClick={() => { setWorkspace("analysis"); setProbeMode(false); }}
               disabled={!canAnalyze}
               title={!canAnalyze ? "Select a landing site or inspect a point first" : "Analyze selected point"}
-              className={`h-9 shrink-0 border-b-2 px-3 transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${workspace === "analysis" ? "border-accent bg-[#363636] text-white" : "border-transparent text-[#aaa] hover:bg-[#333] hover:text-white"}`}>
+              className={`h-full shrink-0 border-b-[3px] px-2 transition-colors disabled:cursor-not-allowed disabled:opacity-50 sm:px-3 ${workspace === "analysis" ? "border-accent font-medium text-white" : "border-transparent text-[#c0c3c6] hover:bg-[#333] hover:text-white"}`}>
               Mission Analysis
             </button>
             <button type="button" onClick={() => { setWorkspace("statistics"); setProbeMode(false); }}
               disabled={!currentProject}
-              className={`h-9 shrink-0 border-b-2 px-3 transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${workspace === "statistics" ? "border-accent bg-[#363636] text-white" : "border-transparent text-[#aaa] hover:bg-[#333] hover:text-white"}`}>
+              className={`h-full shrink-0 border-b-[3px] px-2 transition-colors disabled:cursor-not-allowed disabled:opacity-50 sm:px-3 ${workspace === "statistics" ? "border-accent font-medium text-white" : "border-transparent text-[#c0c3c6] hover:bg-[#333] hover:text-white"}`}>
               Statistics
             </button>
             </div>
