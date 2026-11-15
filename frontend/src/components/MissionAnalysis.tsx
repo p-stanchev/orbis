@@ -75,7 +75,7 @@ export default function MissionAnalysis({ latitude, longitude, arrivalUtc, durat
         }
         return response.json() as Promise<TerrainPatch>;
       })
-      .then(setTerrain)
+      .then(data => { if (!controller.signal.aborted) setTerrain(data); })
       .catch(reason => { if (!controller.signal.aborted) setTerrainError(String(reason.message || reason)); });
     return () => controller.abort();
   }, [latitude, longitude, viewerMode]);
@@ -96,7 +96,7 @@ export default function MissionAnalysis({ latitude, longitude, arrivalUtc, durat
         }
         return response.json() as Promise<Ephemeris>;
       })
-      .then(data => { setResult(data); setError(""); })
+      .then(data => { if (!controller.signal.aborted) { setResult(data); setError(""); } })
       .catch(reason => {
         if (!controller.signal.aborted) { setError(String(reason.message || reason)); setResult(null); }
       })

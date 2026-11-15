@@ -1,17 +1,23 @@
 import sqlite3
 import hashlib
 import colorsys
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
 DATABASE_PATH = Path(__file__).resolve().parent.parent / "data" / "orbis.db"
 
 
+@contextmanager
 def get_connection():
     connection = sqlite3.connect(DATABASE_PATH, timeout=10)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON")
-    return connection
+    try:
+        with connection:
+            yield connection
+    finally:
+        connection.close()
 
 
 def unique_project_color(connection, project_id: str) -> str:

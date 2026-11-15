@@ -12,9 +12,15 @@ A 30-second demonstration of ORBIS, developed for the 2026 NASA Space Apps Chall
 
 ## Getting Started
 
-To run ORBIS locally, you'll need Node.js and Python installed.
+To run ORBIS locally, you'll need Node.js and Python installed. Run the commands below from the repository root unless a step says otherwise.
 
-**1. Start the backend**
+**1. Add the scientific data**
+
+The large terrain files and SPICE kernels are not included in Git. Create `data/source/` and `data/kernels/` inside the repository if they do not exist. For a basic run, download the 80 m elevation and hillshade files listed under [Lunar Terrain](#lunar-terrain) into `data/source/`, and all four files listed under [SPICE Kernels](#spice-kernels) into `data/kernels/`. Keep the filenames exactly as shown in those tables. You do not need to create or configure a database; ORBIS creates it when the backend starts.
+
+The PSR file adds the shadow overlay. The 5 m files add finer local terrain and slope measurements where they have coverage. Put any of these additional terrain files in `data/source/` too. The SPICE kernels are required for Sun/Earth calculations.
+
+**2. Start the backend**
 
 ```bash
 cd backend
@@ -27,14 +33,20 @@ On Windows, activate the virtual environment:
 .\.venv\Scripts\Activate.ps1
 ```
 
+On macOS or Linux, activate it with:
+
+```bash
+source .venv/bin/activate
+```
+
 Install the dependencies and start the server:
 
 ```bash
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 python -m uvicorn main:app --reload
 ```
 
-**2. Start the frontend**
+**3. Start the frontend**
 
 Open another terminal from the project root:
 
@@ -47,6 +59,12 @@ npm run dev
 Open [http://localhost:5173](http://localhost:5173) in your browser.
 
 The backend runs at [http://localhost:8000](http://localhost:8000), with API documentation available at [http://localhost:8000/docs](http://localhost:8000/docs).
+
+### First steps in ORBIS
+
+1. Open **Explore → Candidate search**. Choose a search area, arrival time, mission duration, and the longest darkness and Earth outage your mission can tolerate. You can explore the map before creating a project.
+2. Run **Search candidate areas**. If a result looks worth keeping, give it a name and select **Create project + candidate site**. You can also use **Create** in the header to start a project directly.
+3. Select the saved site in **Browse**. Use **Mission Analysis** to inspect its terrain and changing Sun/Earth visibility, and **Statistics** to see the visibility windows and compare sites. **Explore → Landing windows** can search for favorable arrival dates at a saved site.
 
 ## Datasets
 
@@ -63,8 +81,8 @@ Dataset paths are configured in [`data/datasets.json`](data/datasets.json), allo
 - For a selected landing site, search 30, 60, or 90 days for favorable arrival times under your darkness and Earth-outage limits. Preview a result in Mission Analysis or save its arrival time and duration to the project.
 - Create a project and an initial candidate site from a search result. You can move the site or add more sites afterward.
 - Use the map's optional PSR, landmark, elevation-contour, and slope layers to explore terrain context.
-- Use Mission Analysis to see Sun and Earth visibility windows and a timeline for a selected site or inspected point.
-- Use Statistics to examine mission visibility, inspect points, and compare landing sites. Resize the workspace panels on desktop; smaller screens use stacked panes and drawers.
+- Use Mission Analysis to view terrain, live Sun and Earth readings, and a mission-time slider for a selected site or inspected point.
+- Use Statistics to examine visibility windows on a shared timeline, inspect points, and compare landing sites. Resize the workspace panels on desktop; smaller screens use stacked panes and drawers.
 
 Candidate areas are visibility estimates, not confirmed safe landing sites. Sun visibility does not guarantee enough solar power, and Earth visibility does not guarantee a working radio link.
 
@@ -100,9 +118,11 @@ A media page may show a wider region, selected terrain, or a scientific visualiz
 
 | Dataset | File | Source |
 |---|---|---|
-| Elevation (80 m/pixel) | `LDEM_80S_80MPP_ADJ.tiff` | [NASA LOLA South Pole](https://pgda.gsfc.nasa.gov/products/90) |
-| Hillshade (80 m/pixel) | `LDEM_80S_80MPP_ADJ_HILL.tiff` | [NASA LOLA South Pole](https://pgda.gsfc.nasa.gov/products/90) |
-| Permanently Shadowed Regions (20 m/pixel) | `LPSR_80S_20MPP_ADJ.tiff` | [NASA LOLA South Pole](https://pgda.gsfc.nasa.gov/products/90) |
+| Elevation (80 m/pixel) | `LDEM_80S_80MPP_ADJ.tiff` | [Download from NASA](https://pgda.gsfc.nasa.gov/data/LOLA_20mpp/LDEM_80S_80MPP_ADJ.TIF) |
+| Hillshade (80 m/pixel) | `LDEM_80S_80MPP_ADJ_HILL.tiff` | [Download from NASA](https://pgda.gsfc.nasa.gov/data/LOLA_20mpp/LDEM_80S_80MPP_ADJ_HILL.TIF) |
+| Permanently Shadowed Regions (20 m/pixel) | `LPSR_80S_20MPP_ADJ.tiff` | [Download from NASA](https://pgda.gsfc.nasa.gov/data/LOLA_20mpp/LPSR_80S_20MPP_ADJ.TIF) |
+
+NASA serves these three files with a `.TIF` extension. Save them in `data/source/` with the `.tiff` filenames shown above, which match `data/datasets.json`.
 
 **High-Resolution South Pole Mosaic (87°S–90°S)**
 

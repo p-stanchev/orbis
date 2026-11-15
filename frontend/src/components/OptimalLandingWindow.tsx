@@ -47,7 +47,7 @@ export default function OptimalLandingWindow({ projects, initialProjectId, initi
     controller.current?.abort();
     setBusy(false);
     setResult(null);
-  }, [projectId, siteId, start, days, duration, darkness, outage, uncertaintyM]);
+  }, [projectId, siteId, site?.latitude, site?.longitude, start, days, duration, darkness, outage, uncertaintyM]);
 
   async function search() {
     if (!project || !site) { setError("Choose a landing site first."); return; }
@@ -55,9 +55,10 @@ export default function OptimalLandingWindow({ projects, initialProjectId, initi
     const darkHours = Number(darkness);
     const outageHours = Number(outage);
     const arrival = new Date(`${start}Z`);
-    if (!start || !Number.isFinite(arrival.getTime()) || !duration.trim() || !Number.isFinite(durationHours) || durationHours < 1 || durationHours > 8760 ||
-      !darkness.trim() || !outage.trim() || !Number.isFinite(darkHours) || !Number.isFinite(outageHours) || darkHours < 0 || outageHours < 0) {
-      setError("Enter a valid UTC start, mission duration, and nonnegative outage limits."); return;
+    if (!start || !Number.isFinite(arrival.getTime()) || !duration.trim() || !Number.isInteger(durationHours) || durationHours < 1 || durationHours > 8760 ||
+      !darkness.trim() || !outage.trim() || !Number.isFinite(darkHours) || !Number.isFinite(outageHours) ||
+      darkHours < 0 || darkHours > 8760 || outageHours < 0 || outageHours > 8760) {
+      setError("Enter a valid UTC start, 1–8760 whole mission hours, and outage limits from 0–8760 hours."); return;
     }
     controller.current?.abort();
     const active = new AbortController();

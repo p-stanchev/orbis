@@ -387,8 +387,7 @@ def render_layer(layer: str) -> bytes:
             pixels[valid & (values >= 15) & (values < 30)] = (240, 139, 66, 165)
             pixels[valid & (values >= 30)] = (220, 77, 98, 190)
         else:
-            # Positive PSR values are treated as flagged regions; confirm against NASA raster metadata.
-            psr = valid & (values > 0)
+            psr = valid & (values >= 0.5)
             pixels[:, :, :3] = (3, 172, 228)
             pixels[:, :, 3] = np.where(psr, 205, 0).astype(np.uint8)
 
